@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>MiniPC Remote</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+    width: 100%; min-height: 100vh;
+    background: #0a0e1a; color: #fff;
+    font-family: Arial, sans-serif;
+    overflow-x: hidden;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: rgba(0,0,0,0);
+}
+.header {
+    text-align: center; padding: 10px 0 6px 0;
+    background: rgba(20,25,45,0.95);
+    border-bottom: 1px solid rgba(30,42,74,0.6);
+}
+.header h1 { font-size: 16px; color: #00d4ff; letter-spacing: 1px; }
+.status { font-size: 10px; color: #8892b0; margin-top: 2px; }
+.status-dot {
+    display: inline-block; width: 7px; height: 7px;
+    background: #00e676; border-radius: 50%;
+    margin-right: 3px; vertical-align: middle;
+}
+.status-dot.off { background: #ff5252; }
+
+/* Tabs */
+.tabs {
+    display: block; text-align: center;
+    background: rgba(20,25,45,0.8);
+    border-bottom: 1px solid rgba(30,42,74,0.6);
+    padding: 4px 0;
+}
+.tab {
+    display: inline-block; padding: 6px 20px;
+    font-size: 13px; color: #8892b0; cursor: pointer;
+    border-bottom: 2px solid transparent;
+}
+.tab.active { color: #00d4ff; border-bottom-color: #00d4ff; }
+
+/* Pages */
+.page { display: none; }
+.page.active { display: block; }
+
+/* Main content */
+.main { padding: 6px 10px; text-align: center; }
+
+/* Volume OSD */
+.vol-osd {
+    display: none; text-align: center; padding: 4px 0;
+    font-size: 14px; color: #00d4ff; font-weight: bold;
+    background: rgba(0,212,255,0.1); border-radius: 8px;
+    margin: 4px 10px;
+}
+
+/* Toast */
+.toast {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    background: #00e676; color: #0a0e1a; font-weight: bold; font-size: 14px;
+    padding: 10px 20px; border-radius: 20px; z-index: 1000;
+    opacity: 0; transition: opacity 0.3s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
+
+/* Top row */
+.top-row { text-align: center; margin-bottom: 6px; }
+.top-row .btn { display: inline-block; width: 44%; margin: 0 2%; }
+
+/* D-Pad */
+.dpad {
+    position: relative; width: 220px; height: 220px;
+    margin: 4px auto;
+}
+.dpad .btn { position: absolute; width: 68px; height: 68px; border-radius: 12px; }
+.dpad .btn-up    { top: 0; left: 76px; }
+.dpad .btn-down  { bottom: 0; left: 76px; }
+.dpad .btn-left  { top: 76px; left: 0; }
+.dpad .btn-right { top: 76px; right: 0; }
+.dpad .btn-ok {
+    top: 66px; left: 66px; width: 88px; height: 88px;
+    border-radius: 50%; background: rgba(0,212,255,0.15);
+    border-color: #00d4ff; font-size: 18px;
+}
+
+/* Volume/media rows */
+.row { text-align: center; margin-top: 6px; padding: 0 10px; }
+.row .btn { display: inline-block; width: 42%; margin: 0 3%; }
+
+/* Button */
+.btn {
+    background: #1a1f36; border: 2px solid rgba(30,42,74,0.6);
+    border-radius: 12px; color: #fff;
+    font-size: 15px; font-weight: bold;
+    padding: 12px 0; cursor: pointer;
+    text-align: center; -webkit-appearance: none; outline: none;
+}
+.btn:active, .btn.pressed {
+    background: #00d4ff; color: #0a0e1a; border-color: #00d4ff;
+}
+.btn-accent { border-color: rgba(0,212,255,0.4); }
+.btn .sub { font-size: 10px; color: #8892b0; margin-top: 1px; font-weight: normal; }
+.btn:active .sub { color: #0a0e1a; }
+
+/* Music page */
+.now-playing {
+    background: #111827; border-radius: 16px;
+    padding: 16px; margin: 8px 0; text-align: center;
+}
+.np-art {
+    width: 140px; height: 140px; margin: 0 auto 12px auto;
+    background: #1a1f36; border-radius: 12px;
+    border: 2px solid rgba(30,42,74,0.6);
+    line-height: 140px; font-size: 60px; color: #00d4ff; cursor: pointer;
+    overflow: hidden;
+}
+
+/* Artwork Modal */
+.art-modal {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(10,14,26,0.95); z-index: 2000;
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+}
+.art-modal img {
+    max-width: 90%; max-height: 80%; border-radius: 20px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+.art-modal-close {
+    position: absolute; top: 20px; right: 20px;
+    font-size: 30px; color: #fff; cursor: pointer;
+}
+.np-title { font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 4px; }
+.np-artist { font-size: 14px; color: #8892b0; margin-bottom: 12px; }
+.music-controls { text-align: center; }
+.music-controls .btn { display: inline-block; width: 70px; height: 60px; margin: 0 6px; vertical-align: middle; }
+.music-controls .btn-play { width: 80px; height: 70px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>MiniPC Remote</h1>
+    <div class="status"><span class="status-dot" id="dot"></span><span id="stxt">Connecting...</span></div>
+</div>
+<div id="latencyBanner" style="display:none; background: #ffa726; color: #fff; text-align: center; padding: 10px; font-weight: bold; font-size: 14px; position: fixed; top: 0; left: 0; width: 100%; z-index: 10000; box-shadow: 0 4px 10px rgba(0,0,0,0.5);">
+    Waiting for MiniPC...
+</div>
+
+<div class="tabs">
+    <span class="tab active" id="tab-remote" onclick="switchTab('remote')">Remote</span>
+    <span class="tab" id="tab-music" onclick="switchTab('music')">Music</span>
+    <span class="tab" id="tab-library" onclick="switchTab('library')">Library</span>
+    <span class="tab" id="tab-files" onclick="switchTab('files')">Files</span>
+    <span class="tab" id="tab-system" onclick="switchTab('system')">Power</span>
+</div>
+
+<!-- Volume OSD -->
+<div class="vol-osd" id="volOsd"></div>
+<div class="toast" id="toast">Successfully completed</div>
+
+<!-- Fullscreen Art Modal -->
+<div class="art-modal" id="artModal" onclick="closeArtFullscreen()">
+    <div class="art-modal-close">&times;</div>
+    <img id="artModalImg" src="" alt="Album Art">
+</div>
+
+<!-- REMOTE PAGE -->
+<div class="page active" id="page-remote">
+<div class="main">
+    <div class="top-row">
+        <div class="btn btn-accent" onclick="send('home',this)">
+            HOME<div class="sub">Home</div>
+        </div>
+        <div class="btn btn-accent" onclick="send('back',this)">
+            BACK<div class="sub">Back</div>
+        </div>
+    </div>
+    <div class="dpad">
+        <div class="btn btn-up" onclick="send('up',this)">UP</div>
+        <div class="btn btn-left" onclick="send('left',this)">LEFT</div>
+        <div class="btn btn-ok" onclick="send('select',this)">OK</div>
+        <div class="btn btn-right" onclick="send('right',this)">RIGHT</div>
+        <div class="btn btn-down" onclick="send('down',this)">DOWN</div>
+    </div>
+    <div class="row">
+        <div class="btn" style="width: 30%; margin: 0 1%" onclick="send('volume_down',this)">VOL -</div>
+        <div class="btn" style="width: 30%; margin: 0 1%" onclick="send('mute',this)">MUTE</div>
+        <div class="btn" style="width: 30%; margin: 0 1%" onclick="send('volume_up',this)">VOL +</div>
+    </div>
+    <div class="row">
+        <div class="btn btn-accent" style="width: 90%" onclick="send('play_pause',this)">
+            PLAY / PAUSE
+        </div>
+    </div>
+</div>
+</div>
+
+<!-- MUSIC PAGE -->
+<div class="page" id="page-music">
+<div class="main">
+    <div class="now-playing" style="position:relative;">
+        <div class="np-art" id="npArt" onclick="openArtFullscreen()">&#9834;</div>
+        <div class="np-title" id="npTitle">Not Playing</div>
+        <div class="np-artist" id="npArtist">Open Spotify on your PC</div>
+        <div class="np-artist" id="npAlbum" style="opacity:0.7; font-size:14px; margin-top:2px;"></div>
+        <div id="btnLike" style="position:absolute; top:15px; right:15px; font-size:24px; color:#8892b0; cursor:pointer;" title="Like Track" onclick="toggleLike()">&#10084;</div>
+        <div id="btnForceSync" style="position:absolute; top:50px; right:15px; font-size:24px; color:#8892b0; cursor:pointer;" title="Force Sync" onclick="pollSpotify(true)">&#8635;</div>
+    </div>
+    <div class="row" style="margin-bottom:10px">
+        <div class="btn btn-accent" style="width: 80%; padding: 8px 0;" onclick="send('spotify_launch',this)">
+            LAUNCH SPOTIFY
+        </div>
+    </div>
+    <div class="music-controls">
+        <div class="btn" onclick="send('spotify_prev',this)">|&lt;</div>
+        <div class="btn btn-accent btn-play" onclick="send('spotify_play_pause',this)">&gt;&gt;</div>
+        <div class="btn" onclick="send('spotify_next',this)">&gt;|</div>
+    </div>
+    <div class="row" style="margin-top:10px">
+        <div class="btn" style="width: 30%; margin: 0 1%" onclick="send('volume_down',this)">VOL -</div>
+        <div class="btn" style="width: 30%; margin: 0 1%" onclick="send('mute',this)">MUTE</div>
+        <div class="btn" style="width: 30%; margin: 0 1%" onclick="send('volume_up',this)">VOL +</div>
+    </div>
+    <div class="row" style="margin-top:10px">
+        <div class="btn" style="width: 30%; margin: 0 1%" onclick="toggleShuffle(this)" id="btnShuffle">SHUFFLE</div>
+        <div class="btn" style="width: 30%; margin: 0 1%" onclick="toggleRepeat(this)" id="btnRepeat">REPEAT</div>
+        <div class="btn" style="width: 30%; margin: 0 1%" onclick="showQueue()">QUEUE</div>
+    </div>
+    
+    <div style="margin-top: 20px; background: rgba(20,25,45,0.85); padding: 15px; border-radius: 12px;">
+        <div style="display: table; width: 100%; margin-bottom: 10px;">
+            <div style="display: table-cell; width: 100%; vertical-align: middle;">
+                <input type="text" id="searchInput" placeholder="Search..." style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid rgba(30,42,74,0.6); background: #111827; color: white; box-sizing: border-box;">
+            </div>
+            <div style="display: table-cell; vertical-align: middle; padding-left: 10px;">
+                <select id="searchType" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(30,42,74,0.6); background: #111827; color: white;">
+                    <option value="track">Track</option>
+                    <option value="album">Album</option>
+                    <option value="artist">Artist</option>
+                    <option value="playlist">Playlist</option>
+                </select>
+            </div>
+            <div style="display: table-cell; vertical-align: middle; padding-left: 10px;">
+                <input type="number" id="searchLimit" value="5" min="1" max="50" style="padding: 10px; border-radius: 6px; border: 1px solid rgba(30,42,74,0.6); background: #111827; color: white; width: 60px;">
+            </div>
+            <div style="display: table-cell; vertical-align: middle; padding-left: 10px;">
+                <div class="btn btn-accent" style="width: 80px; padding: 10px 0; font-size: 14px;" onclick="searchSpotify()">Search</div>
+            </div>
+        </div>
+        <div id="searchResults" style="text-align: left;"></div>
+    </div>
+</div>
+</div>
+
+<!-- LIBRARY PAGE -->
+<div class="page" id="page-library">
+<div class="main">
+    <div id="libHeader" style="margin-top: 10px; margin-bottom: 10px; text-align: left; font-size: 18px; font-weight: bold; color: #00d4ff;">
+        Your Library
+    </div>
+    <div id="libContent" style="text-align: left; background: rgba(20,25,45,0.85); padding: 5px; border-radius: 12px;">
+        <div style="color:#8892b0; padding:10px;">Loading library...</div>
+    </div>
+</div>
+</div>
+
+<!-- FILES PAGE -->
+<div class="page" id="page-files">
+<div class="main">
+    <div style="margin-top: 10px; margin-bottom: 10px; text-align: left; font-size: 18px; font-weight: bold; color: #00d4ff;">
+        Local Videos
+    </div>
+    <div class="row" style="margin-bottom:10px">
+        <div class="btn btn-accent" style="width: 100%; padding: 8px 0;" onclick="loadFiles()">
+            REFRESH FILES
+        </div>
+    </div>
+    <div id="filesContent" style="text-align: left; background: rgba(20,25,45,0.85); padding: 5px; border-radius: 12px;">
+        <div style="color:#8892b0; padding:10px;">Click refresh to load videos...</div>
+    </div>
+</div>
+</div>
+
+<!-- SYSTEM PAGE -->
+<div class="page" id="page-system">
+<div class="main">
+    <div style="margin-top: 20px; text-align: center;">
+        <h2 style="color: #00d4ff; font-size: 18px; margin-bottom: 20px;">System Status</h2>
+        
+        <div style="background: rgba(20,25,45,0.85); padding: 15px; border-radius: 12px; margin-bottom: 20px; text-align: left;">
+            <div style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; color: white; margin-bottom: 5px;">
+                    <span>CPU Usage</span>
+                    <span id="sysCpuVal">0%</span>
+                </div>
+                <div style="width: 100%; background: #111827; height: 10px; border-radius: 5px;">
+                    <div id="sysCpuBar" style="width: 0%; height: 100%; background: #00d4ff; border-radius: 5px; transition: width 0.5s;"></div>
+                </div>
+            </div>
+            <div>
+                <div style="display: flex; justify-content: space-between; color: white; margin-bottom: 5px;">
+                    <span>RAM Usage</span>
+                    <span id="sysRamVal">0%</span>
+                </div>
+                <div style="width: 100%; background: #111827; height: 10px; border-radius: 5px;">
+                    <div id="sysRamBar" style="width: 0%; height: 100%; background: #7b61ff; border-radius: 5px; transition: width 0.5s;"></div>
+                </div>
+            </div>
+        </div>
+
+        <h2 style="color: #ff5252; font-size: 18px; margin-bottom: 15px;">Power Controls</h2>
+        
+        <div class="row" style="margin-bottom: 15px;">
+            <div class="btn" style="width: 80%; background: #ff5252; color: white; border: none; padding: 15px 0;" onclick="if(confirm('Are you sure you want to shutdown the PC?')) sendCmd('/api/system/shutdown', this)">
+                SHUTDOWN PC
+            </div>
+        </div>
+        <div class="row" style="margin-bottom: 15px;">
+            <div class="btn" style="width: 80%; background: #ffa726; color: white; border: none; padding: 15px 0;" onclick="if(confirm('This will change display scaling to 100% and restart the desktop. Continue?')) sendCmd('/api/system/scaling', this)">
+                SET SCREEN TO 100% (RESTART)
+            </div>
+        </div>
+
+        <h2 style="color: #00d4ff; font-size: 18px; margin-bottom: 15px;">Network Settings</h2>
+        <div class="row" style="margin-bottom:10px">
+            <div class="btn btn-accent" style="width: 80%; padding: 8px 0;" onclick="scanWifi()">
+                SCAN WI-FI
+            </div>
+        </div>
+        <div id="wifiContent" style="text-align: left; background: rgba(20,25,45,0.85); padding: 5px; border-radius: 12px; margin-bottom: 20px;">
+            <div style="color:#8892b0; padding:10px; text-align: center;">Click scan to find networks...</div>
+        </div>
+        
+        <div class="row" style="margin-bottom: 15px;">
+            <div class="btn" style="width: 80%; background: #ffa726; color: white; border: none; padding: 15px 0;" onclick="if(confirm('Are you sure you want to restart the PC?')) sendCmd('/api/system/restart', this)">
+                RESTART PC
+            </div>
+        </div>
+
+        <div class="row" style="margin-bottom: 15px;">
+            <div class="btn" style="width: 80%; padding: 15px 0;" onclick="if(confirm('Are you sure you want to close the MiniPC app?')) sendCmd('/api/system/close_app', this)">
+                CLOSE MINIPC APP
+            </div>
+        </div>
+        
+        <hr style="border: 0; height: 1px; background: rgba(30,42,74,0.6); margin: 20px 10%; width: 80%;">
+        
+        <div class="row">
+            <div class="btn btn-accent" style="width: 80%; padding: 15px 0;" onclick="toggleFullscreen()">
+                TOGGLE FULLSCREEN (KINDLE)
+            </div>
+        </div>
+        
+        <div class="row" style="margin-top: 15px;">
+            <div class="btn btn-accent" style="width: 80%; padding: 15px 0;" onclick="toggleSearchArt(this)" id="btnSearchArt">
+                SHOW SEARCH ALBUM ART: OFF
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+
+<script>
+// Prevent aggressive caching on older Android WebViews
+var originalOpen = XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open = function(method, url, async, user, pass) {
+    if (method.toUpperCase() === 'GET') {
+        url += (url.indexOf('?') === -1 ? '?' : '&') + '_t=' + new Date().getTime();
+    }
+    return originalOpen.call(this, method, url, async, user, pass);
+};
+
+var dot = document.getElementById('dot');
+var stxt = document.getElementById('stxt');
+var volOsd = document.getElementById('volOsd');
+var npTitle = document.getElementById('npTitle');
+var npArtist = document.getElementById('npArtist');
+var volTimer = null;
+var connected = false;
+var currentTab = 'home';
+var showSearchArt = localStorage.getItem('showSearchArt') === 'true';
+
+function updateSearchArtBtn() {
+    var btn = document.getElementById('btnSearchArt');
+    if(btn) btn.innerHTML = 'SHOW SEARCH ALBUM ART: ' + (showSearchArt ? 'ON' : 'OFF');
+}
+
+function toggleSearchArt(btn) {
+    showSearchArt = !showSearchArt;
+    localStorage.setItem('showSearchArt', showSearchArt);
+    updateSearchArtBtn();
+    if (currentTab === 'library' && currentLibNode) {
+        renderLibrary();
+    }
+}
+
+function switchTab(name) {
+    currentTab = name;
+    var tabs = document.getElementsByClassName('tab');
+    for (var i = 0; i < tabs.length; i++) tabs[i].className = 'tab';
+    document.getElementById('tab-' + name).className = 'tab active';
+    var pages = document.getElementsByClassName('page');
+    for (var i = 0; i < pages.length; i++) pages[i].className = 'page';
+    document.getElementById('page-' + name).className = 'page active';
+    if (name === 'music') pollSpotify();
+    if (name === 'library' && !libraryTree) loadLibrary();
+}
+
+function send(cmd, btn) {
+    if (btn) {
+        btn.className = btn.className + ' pressed';
+        setTimeout(function() {
+            btn.className = btn.className.replace(' pressed', '');
+        }, 200);
+    }
+    
+    var banner = document.getElementById('latencyBanner');
+    banner.style.display = 'block';
+    banner.style.background = '#ffa726';
+    banner.innerText = 'Waiting for MiniPC...';
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/command/' + cmd, true);
+    xhr.timeout = 3000;
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) {
+                if (!connected) { connected = true; dot.className = 'status-dot'; stxt.innerHTML = 'Connected'; }
+                banner.style.background = '#00e676';
+                banner.innerText = 'Successfully completed!';
+                setTimeout(function(){ banner.style.display = 'none'; }, 1000);
+                
+                // Show volume feedback for volume commands
+                if (cmd === 'volume_up' || cmd === 'volume_down' || cmd === 'mute') {
+                    try {
+                        var data = JSON.parse(xhr.responseText);
+                        if (data.volume !== undefined) showVol(data.volume);
+                    } catch(e) {}
+                }
+            } else {
+                connected = false; dot.className = 'status-dot off'; stxt.innerHTML = 'Lost connection';
+                banner.style.background = '#ff5252';
+                banner.innerText = 'Action Failed (No Connection)';
+                setTimeout(function(){ banner.style.display = 'none'; }, 2000);
+            }
+        }
+    };
+    xhr.onerror = function() { 
+        connected = false; dot.className = 'status-dot off'; stxt.innerHTML = 'Lost connection'; 
+        banner.style.background = '#ff5252';
+        banner.innerText = 'Action Failed (Network Error)';
+        setTimeout(function(){ banner.style.display = 'none'; }, 2000);
+    };
+    xhr.send();
+}
+
+var toastTimer = null;
+function showToast(msg) {
+    var toast = document.getElementById('toast');
+    toast.innerHTML = msg;
+    toast.className = 'toast show';
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function() { toast.className = 'toast'; }, 2500);
+}
+
+function showVol(v) {
+    volOsd.innerHTML = 'Volume: ' + v + '%';
+    volOsd.style.display = 'block';
+    if (volTimer) clearTimeout(volTimer);
+    volTimer = setTimeout(function() { volOsd.style.display = 'none'; }, 2000);
+}
+
+function pollSpotify(force) {
+    if (currentTab !== 'music' && !force) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/spotify/now_playing', true);
+    xhr.timeout = 3000;
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                if (d.playing) {
+                    if (d.is_ad) {
+                        npTitle.innerHTML = 'Advertisement';
+                        npArtist.innerHTML = 'Spotify';
+                        document.getElementById('btnLike').style.color = '#8892b0';
+                    } else {
+                        npTitle.innerHTML = d.title || 'Unknown';
+                        npArtist.innerHTML = d.artist || '';
+                    }
+                    document.getElementById('npAlbum').innerHTML = d.album || '';
+                    if (d.uri && d.uri !== currentUri) {
+                        currentUri = d.uri;
+                        if (!d.is_ad) checkLike(currentUri);
+                    }
+                    if (d.artwork) {
+                        document.getElementById('npArt').innerHTML = '<img src="' + d.artwork + '" style="width:100%;height:100%;object-fit:cover;">';
+                    } else {
+                        document.getElementById('npArt').innerHTML = '&#9834;';
+                    }
+                } else {
+                    npTitle.innerHTML = d.title || 'Paused';
+                    npArtist.innerHTML = d.artist || 'Open Spotify on PC';
+                    document.getElementById('npAlbum').innerHTML = '';
+                    document.getElementById('npArt').innerHTML = '&#9834;';
+                    currentUri = "";
+                    document.getElementById('btnLike').style.color = '#8892b0';
+                }
+            } catch(e) {}
+        }
+    };
+    xhr.send();
+}
+
+function checkConn() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/status', true);
+    xhr.timeout = 3000;
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) { connected = true; dot.className = 'status-dot'; stxt.innerHTML = 'Connected'; }
+            else { connected = false; dot.className = 'status-dot off'; stxt.innerHTML = 'Not connected'; }
+        }
+    };
+    xhr.onerror = function() { connected = false; dot.className = 'status-dot off'; stxt.innerHTML = 'Not connected'; };
+    xhr.send();
+}
+
+function openArtFullscreen() {
+    var img = document.getElementById('npArt').querySelector('img');
+    if (img && img.src) {
+        document.getElementById('artModalImg').src = img.src;
+        document.getElementById('artModal').style.display = 'flex';
+    }
+}
+function closeArtFullscreen() {
+    document.getElementById('artModal').style.display = 'none';
+}
+
+function searchSpotify() {
+    var query = document.getElementById('searchInput').value;
+    var type = document.getElementById('searchType').value || 'track';
+    var limit = document.getElementById('searchLimit').value || 5;
+    if (!query) return;
+    var resDiv = document.getElementById('searchResults');
+    resDiv.innerHTML = '<div style="color:#8892b0; padding:10px;">Searching...</div>';
+    
+    var xhr = new XMLHttpRequest();
+    var url = '/api/spotify/search?q=' + encodeURIComponent(query) + '&type=' + encodeURIComponent(type) + '&limit=' + encodeURIComponent(limit);
+    xhr.open('GET', url, true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                showToast('Successfully completed');
+                var d = JSON.parse(xhr.responseText);
+                var html = '';
+                
+                var items = [];
+                if (type === 'track' && d.tracks) items = d.tracks;
+                else if (type === 'album' && d.albums) items = d.albums;
+                else if (type === 'artist' && d.artists) items = d.artists;
+                else if (type === 'playlist' && d.playlists) items = d.playlists;
+                
+                if (query.toLowerCase().indexOf('liked') !== -1) {
+                    items.unshift({
+                        uri: 'spotify:collection:tracks',
+                        name: 'Liked Songs',
+                        author: 'Your Library',
+                        image: 'https://misc.scdn.co/liked-songs/liked-songs-300.png'
+                    });
+                }
+                
+                if (items.length > 0) {
+                    for (var i=0; i<items.length; i++) {
+                        var t = items[i];
+                        html += '<div style="padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: pointer;" onclick="playUri(\'' + t.uri + '\')">';
+                        
+                        html += '<div style="display: table; width: 100%;">';
+                        
+                        if (showSearchArt && t.image) {
+                            var imgUrl = t.image;
+                            if (t.image.indexOf('spotify:image:') === 0) {
+                                imgUrl = 'https://i.scdn.co/image/' + t.image.split(':')[2];
+                            }
+                            html += '<div style="display: table-cell; vertical-align: middle; width: 60px; padding-right: 15px;">';
+                            html += '<img src="' + imgUrl + '" style="width: 50px; height: 50px; border-radius: 6px; object-fit: cover;">';
+                            html += '</div>';
+                        }
+                        
+                        html += '<div style="display: table-cell; vertical-align: middle;">';
+                        html += '<div style="font-weight: bold; color: #fff;">' + t.name + '</div>';
+                        if (t.artists) {
+                            html += '<div style="font-size: 12px; color: #8892b0;">' + t.artists.join(', ') + '</div>';
+                        } else if (t.author) {
+                            html += '<div style="font-size: 12px; color: #8892b0;">' + t.author + '</div>';
+                        }
+                        html += '</div>';
+                        
+                        html += '<div style="display: table-cell; vertical-align: middle; text-align: right; width: 40px; font-size: 28px; color: #8892b0; padding-left: 10px;" onclick="event.stopPropagation(); queueFromSearch(\'' + t.uri + '\', this)">';
+                        html += '&#8803;'; // '☰' equivalent for queue
+                        html += '</div>';
+
+                        html += '<div style="display: table-cell; vertical-align: middle; text-align: right; width: 40px; font-size: 28px; color: #8892b0; padding-left: 10px;" onclick="event.stopPropagation(); addFromSearch(\'' + t.uri + '\', this)">';
+                        html += '&#43;';
+                        html += '</div>';
+                        
+                        html += '</div>';
+                        
+                        html += '</div>';
+                    }
+                } else {
+                    html = '<div style="color:#8892b0; padding:10px;">No results found</div>';
+                }
+                resDiv.innerHTML = html;
+            } catch(e) {
+                resDiv.innerHTML = '<div style="color:#ff5252; padding:10px;">Error parsing results</div>';
+            }
+        }
+    };
+    xhr.send();
+}
+
+var currentUri = "";
+var isLiked = false;
+
+function addFromSearch(uri, el) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/spotify/library/add?uri=' + encodeURIComponent(uri), true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                if (d.ok) {
+                    el.innerHTML = '&#10003;';
+                    el.style.color = '#00e676';
+                    showToast('Saved to Library');
+                } else {
+                    el.innerHTML = '&#10007;';
+                    el.style.color = '#ff5252';
+                    showToast('Failed to save (CLI Error)');
+                }
+            } catch(e) {
+                showToast('Error communicating with server');
+            }
+        }
+    };
+    xhr.send();
+}
+
+function queueFromSearch(uri, el) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/spotify/queue/add?uri=' + encodeURIComponent(uri), true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                if (d.ok) {
+                    el.innerHTML = '&#10003;';
+                    el.style.color = '#00e676';
+                    showToast('Queued');
+                } else {
+                    el.innerHTML = '&#10007;';
+                    el.style.color = '#ff5252';
+                    showToast('Failed to queue');
+                }
+            } catch(e) {}
+        }
+    };
+    xhr.send();
+}
+
+var shuffleState = false;
+var repeatStates = ["off", "context", "track"];
+var repeatIndex = 0;
+
+function toggleShuffle(btn) {
+    shuffleState = !shuffleState;
+    btn.style.color = shuffleState ? '#00e676' : '#fff';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/spotify/shuffle?state=' + shuffleState, true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                if (!d.ok) {
+                    shuffleState = !shuffleState; // Revert
+                    btn.style.color = shuffleState ? '#00e676' : '#fff';
+                    showToast('Premium required (Free account restriction)');
+                }
+            } catch(e) {}
+        }
+    };
+    xhr.send();
+}
+
+function toggleRepeat(btn) {
+    var oldIndex = repeatIndex;
+    repeatIndex = (repeatIndex + 1) % repeatStates.length;
+    var st = repeatStates[repeatIndex];
+    if (st === "off") btn.style.color = '#fff';
+    else if (st === "context") btn.style.color = '#00e676';
+    else if (st === "track") btn.style.color = '#00d4ff';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/spotify/repeat?state=' + st, true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                if (!d.ok) {
+                    repeatIndex = oldIndex; // Revert
+                    var ost = repeatStates[repeatIndex];
+                    if (ost === "off") btn.style.color = '#fff';
+                    else if (ost === "context") btn.style.color = '#00e676';
+                    else if (ost === "track") btn.style.color = '#00d4ff';
+                    showToast('Premium required (Free account restriction)');
+                }
+            } catch(e) {}
+        }
+    };
+    xhr.send();
+}
+
+function showQueue() {
+    showToast("Queue view coming soon!");
+}
+
+function playUri(uri) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/spotify/play?uri=' + encodeURIComponent(uri), true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) showToast('Successfully completed');
+    };
+    xhr.send();
+}
+
+function sendCmd(url, btn) {
+    if (btn) {
+        btn.className = btn.className + ' pressed';
+        setTimeout(function() {
+            btn.className = btn.className.replace(' pressed', '');
+        }, 200);
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) showToast('Successfully completed');
+    };
+    xhr.send();
+}
+
+function toggleLike() {
+    if (!currentUri) return;
+    var action = isLiked ? 'remove' : 'add';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/spotify/library/' + action + '?uri=' + encodeURIComponent(currentUri), true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            showToast('Successfully completed');
+            isLiked = !isLiked;
+            document.getElementById('btnLike').style.color = isLiked ? '#00e676' : '#8892b0';
+        }
+    };
+    xhr.send();
+}
+
+function checkLike(uri) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/spotify/library/contains?uri=' + encodeURIComponent(uri), true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                isLiked = d.contains;
+                document.getElementById('btnLike').style.color = isLiked ? '#00e676' : '#8892b0';
+            } catch(e) {}
+        }
+    };
+    xhr.send();
+}
+
+var libraryTree = null;
+var currentLibNode = null;
+var libHistory = [];
+
+function loadLibrary() {
+    var cnt = document.getElementById('libContent');
+    cnt.innerHTML = '<div style="color:#8892b0; padding:10px;">Loading library...</div>';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/spotify/library/hierarchy', true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                if (d.items) {
+                    libraryTree = buildTree(d.items);
+                    currentLibNode = libraryTree;
+                    libHistory = [];
+                    renderLibrary();
+                } else {
+                    cnt.innerHTML = '<div style="color:#ff5252; padding:10px;">Failed to load library</div>';
+                }
+            } catch(e) {
+                cnt.innerHTML = '<div style="color:#ff5252; padding:10px;">Error parsing library</div>';
+            }
+        }
+    };
+    xhr.send();
+}
+
+function renderLibrary() {
+    var html = '';
+    var hdr = document.getElementById('libHeader');
+    var cnt = document.getElementById('libContent');
+    
+    if (libHistory.length > 0) {
+        hdr.innerHTML = '<span style="cursor:pointer; color:#8892b0; margin-right:10px; font-size:14px; background:#111827; padding:4px 8px; border-radius:6px;" onclick="libGoBack()">&#8592; Back</span> ' + currentLibNode.name;
+    } else {
+        hdr.innerHTML = 'Your Library <span style="font-size:12px; float:right; cursor:pointer; color:#8892b0; background:#111827; padding:4px 8px; border-radius:6px;" onclick="loadLibrary()">&#x21bb; Refresh</span>';
+    }
+    
+    if (!currentLibNode.children || currentLibNode.children.length === 0) {
+        cnt.innerHTML = '<div style="color:#8892b0; padding:10px;">Folder is empty</div>';
+        return;
+    }
+    
+    for (var i=0; i<currentLibNode.children.length; i++) {
+        var child = currentLibNode.children[i];
+        html += '<div style="padding: 15px 10px; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: pointer; display: table; width: 100%;" onclick="libClick(' + i + ')">';
+        html += '<div id="lib-art-' + i + '" style="display: table-cell; vertical-align: middle; width: 50px; padding-right: 15px;">';
+        if (child.type === 'folder') {
+            html += '<div style="font-size: 24px; color: #ffa726; text-align: center; width: 40px;">&#128193;</div>';
+        } else {
+            html += '<div style="font-size: 24px; color: #00d4ff; text-align: center; width: 40px;">&#9835;</div>';
+        }
+        html += '</div>';
+        html += '<div style="display: table-cell; vertical-align: middle;">';
+        html += '<div style="font-weight: bold; color: #fff;">' + child.name + '</div>';
+        html += '</div>';
+        html += '</div>';
+    }
+    cnt.innerHTML = html;
+    
+    for (var i=0; i<currentLibNode.children.length; i++) {
+        var child = currentLibNode.children[i];
+        if (showSearchArt && child.type !== 'folder' && child.uri) {
+            fetchArt(child.uri, 'lib-art-' + i);
+        }
+    }
+}
+
+var artCache = {};
+function fetchArt(uri, elementId) {
+    if (artCache[uri]) {
+        var el = document.getElementById(elementId);
+        if (el) el.innerHTML = '<img src="' + artCache[uri] + '" style="width: 40px; height: 40px; border-radius: 6px; object-fit: cover;">';
+        return;
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/proxy_art?uri=' + encodeURIComponent(uri), true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                if (d.thumbnail_url) {
+                    artCache[uri] = d.thumbnail_url;
+                    var el = document.getElementById(elementId);
+                    if (el) el.innerHTML = '<img src="' + d.thumbnail_url + '" style="width: 40px; height: 40px; border-radius: 6px; object-fit: cover;">';
+                }
+            } catch(e) {}
+        }
+    };
+    xhr.send();
+}
+
+function libClick(index) {
+    var child = currentLibNode.children[index];
+    if (child.type === 'folder') {
+        libHistory.push(currentLibNode);
+        currentLibNode = child;
+        renderLibrary();
+    } else {
+        playUri(child.uri);
+        switchTab('music');
+    }
+}
+
+function libGoBack() {
+    if (libHistory.length > 0) {
+        currentLibNode = libHistory.pop();
+        renderLibrary();
+    }
+}
+
+function buildTree(items) {
+    var root = { name: "Library", uri: "", type: "root", children: [] };
+    var stack = [];
+    stack[0] = root;
+    for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var node = { uri: item.uri, name: item.name, type: item.type, children: [] };
+        var pDepth = item.depth - 1;
+        if (!stack[pDepth]) pDepth = stack.length - 1;
+        stack[pDepth].children.push(node);
+        if (item.type === 'folder') {
+            stack[item.depth] = node;
+            stack.length = item.depth + 1;
+        }
+    }
+    return root;
+}
+
+function toggleFullscreen() {
+    var doc = window.document;
+    var docEl = doc.documentElement;
+    var requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.webkitRequestFullscreen || docEl.msRequestFullscreen;
+    var cancelFullScreen = doc.exitFullscreen || doc.mozCancelFullScreen || doc.webkitExitFullscreen || doc.webkitCancelFullScreen || doc.msExitFullscreen;
+
+    if (!doc.fullscreenElement && !doc.mozFullScreenElement && !doc.webkitFullscreenElement && !doc.msFullscreenElement) {
+        if (requestFullScreen) {
+            requestFullScreen.call(docEl);
+        } else {
+            // For very old android / kindle without standard API
+            window.scrollTo(0, 1);
+        }
+    } else {
+        if (cancelFullScreen) {
+            cancelFullScreen.call(doc);
+        }
+    }
+}
+
+// System Stats
+function pollSystemStats() {
+    if (currentTab !== 'system') return;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/system/stats', true);
+    xhr.timeout = 2500;
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                document.getElementById('sysCpuVal').innerText = d.cpu + '%';
+                document.getElementById('sysCpuBar').style.width = d.cpu + '%';
+                document.getElementById('sysRamVal').innerText = d.ram + '%';
+                document.getElementById('sysRamBar').style.width = d.ram + '%';
+            } catch(e) {}
+        }
+    };
+    xhr.send();
+}
+
+// Files
+function loadFiles() {
+    var cnt = document.getElementById('filesContent');
+    cnt.innerHTML = '<div style="color:#8892b0; padding:10px;">Loading files...</div>';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/system/files', true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                var html = '';
+                if (d.items && d.items.length > 0) {
+                    for (var i = 0; i < d.items.length; i++) {
+                        var f = d.items[i];
+                        html += '<div style="padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: pointer;" onclick="playLocalFile(\'' + encodeURIComponent(f.path) + '\')">';
+                        html += '<div style="font-weight: bold; color: #fff;">' + f.name + '</div>';
+                        html += '<div style="font-size: 12px; color: #8892b0; word-break: break-all;">' + f.path + '</div>';
+                        html += '</div>';
+                    }
+                } else {
+                    html = '<div style="color:#8892b0; padding:10px;">No videos found in Videos folder.</div>';
+                }
+                cnt.innerHTML = html;
+            } catch(e) {
+                cnt.innerHTML = '<div style="color:#ff5252; padding:10px;">Error parsing files</div>';
+            }
+        }
+    };
+    xhr.send();
+}
+
+function playLocalFile(path) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/system/play_file?path=' + path, true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            showToast('Playing on MiniPC');
+        }
+    };
+    xhr.send();
+}
+
+// Wi-Fi
+function scanWifi() {
+    var cnt = document.getElementById('wifiContent');
+    cnt.innerHTML = '<div style="color:#8892b0; padding:10px; text-align: center;">Scanning...</div>';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/system/wifi/list', true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                var html = '';
+                if (d.networks && d.networks.length > 0) {
+                    for (var i = 0; i < d.networks.length; i++) {
+                        var nw = d.networks[i];
+                        if (!nw.name) continue;
+                        html += '<div style="padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">';
+                        html += '<div style="font-weight: bold; color: #fff;">' + nw.name + ' <span style="font-size:12px;color:#8892b0;">(' + nw.signal + ')</span></div>';
+                        html += '<div class="btn" style="padding: 5px 10px; font-size: 12px;" onclick="connectWifi(\'' + encodeURIComponent(nw.name) + '\')">CONNECT</div>';
+                        html += '</div>';
+                    }
+                } else {
+                    html = '<div style="color:#8892b0; padding:10px; text-align: center;">No networks found.</div>';
+                }
+                cnt.innerHTML = html;
+            } catch(e) {
+                cnt.innerHTML = '<div style="color:#ff5252; padding:10px; text-align: center;">Error parsing networks</div>';
+            }
+        }
+    };
+    xhr.send();
+}
+
+function connectWifi(ssid) {
+    var pwd = prompt("Enter password for " + decodeURIComponent(ssid) + " (Leave blank if open or already saved):");
+    if (pwd === null) return; // User cancelled
+    
+    showToast('Connecting to ' + decodeURIComponent(ssid) + '...');
+    var xhr = new XMLHttpRequest();
+    var url = '/api/system/wifi/connect?ssid=' + ssid;
+    if (pwd !== "") {
+        url += '&pwd=' + encodeURIComponent(pwd);
+    }
+    xhr.open('GET', url, true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            try {
+                var d = JSON.parse(xhr.responseText);
+                if (d.ok) showToast('Connected!');
+                else showToast('Failed to connect. Wrong password?');
+            } catch(e){}
+        }
+    };
+    xhr.send();
+}
+
+checkConn();
+setInterval(checkConn, 2000);
+setInterval(function() { if (currentTab === 'music') pollSpotify(); }, 3000);
+setInterval(function() { if (currentTab === 'system') pollSystemStats(); }, 3000);
+updateSearchArtBtn();
+</script>
+<!-- Kiosk Mode Integrations -->
+<div id="kioskDisconnectBtn" style="position:fixed; top:10px; right:10px; background:rgba(255,0,0,0.8); color:white; padding:10px 15px; border-radius:8px; z-index:9999; font-weight:bold; font-size:14px;" onclick="window.location.href='minipc://disconnect'">
+    Disconnect Tablet
+</div>
+
+<script>
+    // Poll for unlock
+    setInterval(function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', '/api/unlock_status', true);
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4 && xhr.status === 200) {
+                try {
+                    var d = JSON.parse(xhr.responseText);
+                    if (d.unlock) {
+                        window.location.href = 'minipc://unlock';
+                    }
+                } catch(e) {}
+            }
+        };
+        xhr.send();
+    }, 2000);
+</script>
+</body>
+</html>

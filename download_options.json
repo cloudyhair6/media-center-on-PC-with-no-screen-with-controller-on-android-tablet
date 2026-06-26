@@ -1,0 +1,19 @@
+{
+    "PC App only (comes with development soon will without)": [
+        "setup.bat",
+        "start.bat",
+        "pc_app/"
+    ],
+    "Install Tablet APK": [
+        "tablet_apk/"
+    ],
+    "Just the APK": [
+        "tablet_apk/app.apk"
+    ],
+    "Unlock Tablet": [
+        "tablet_unlock/"
+    ],
+    "Development with the APK": [
+        "development/"
+    ]
+}
