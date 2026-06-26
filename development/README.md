@@ -1,0 +1,1 @@
+you need to get android-sdk on your own i can't upload it to github

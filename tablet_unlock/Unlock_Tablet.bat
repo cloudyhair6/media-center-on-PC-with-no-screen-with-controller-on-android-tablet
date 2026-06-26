@@ -1,0 +1,9 @@
+@echo off
+echo [MiniPC] Unlocking Tablet...
+cd /d "%~dp0"
+echo Method 1: ADB Force Unlock...
+..\development\platform-tools\adb.exe shell am start -n com.minipc.unlock/.UnlockActivity >nul 2>&1
+echo Method 2: Network Unlock...
+powershell -Command "Invoke-WebRequest -Uri http://127.0.0.1:8080/api/unlock_trigger -UseBasicParsing" >nul 2>&1
+echo Tablet should now be unlocked!
+pause
