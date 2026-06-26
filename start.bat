@@ -1,6 +1,8 @@
 @echo off
 echo Checking for updates...
 python installer_and_updater.py --update-check --relaunch "start.bat"
+
+cd pc_app
 echo [MiniPC] Starting...
 
 REM Kill explorer to remove taskbar and free up memory
@@ -18,3 +20,4 @@ python main.py
 
 REM Restore explorer when app exits
 start explorer.exe
+cd ..
