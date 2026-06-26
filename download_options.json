@@ -1,19 +1,34 @@
 {
-    "PC App only (comes with development soon will without)": [
-        "setup.bat",
-        "start.bat",
-        "pc_app/"
-    ],
-    "Install Tablet APK": [
-        "tablet_apk/"
-    ],
-    "Just the APK": [
-        "tablet_apk/app.apk"
-    ],
-    "Unlock Tablet": [
-        "tablet_unlock/"
-    ],
-    "Development with the APK": [
-        "development/"
-    ]
+    "PC App only (comes with development soon will without)": {
+        "Files": [
+            "setup.bat",
+            "start.bat",
+            "pc_app/"
+        ],
+        "Message": "Run the setup.bat file first, it will tell you what to do next!"
+    },
+    "Install Tablet APK": {
+        "Files": [
+            "tablet_apk/"
+        ],
+        "Message": "Open the intall_apk.bat in the tablet_apk folder and follow the instructions."
+    },
+    "Just the APK": {
+        "Files": [
+            "tablet_apk/app.apk"
+        ],
+        "Message": "Move the app.apk into the tablet and then open it to install the app."
+    },
+    "Unlock Tablet": {
+        "Files": [
+            "tablet_unlock/"
+        ],
+        "Message": "Open the Unlock_Tablet.bat in the tablet_unlock folder and follow the instructions."
+    },
+    "Development with the APK": {
+        "Files": [
+            "development/"
+        ],
+        "Message": "Go inside the Development folder and you should find the source code for the android 2.3.4 apk app."
+    }
 }
