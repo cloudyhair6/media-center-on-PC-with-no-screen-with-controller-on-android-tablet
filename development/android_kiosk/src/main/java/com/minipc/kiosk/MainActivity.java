@@ -1333,16 +1333,22 @@ public class MainActivity extends Activity {
             Button b = (Button) v;
             if (isNative) {
                 b.setBackgroundResource(android.R.drawable.btn_default);
-                if (b.getBackground() != null) {
-                    b.getBackground().mutate().clearColorFilter();
-                }
                 b.setTextColor(android.graphics.Color.BLACK);
             } else {
-                b.setBackgroundResource(android.R.drawable.btn_default);
-                if (b.getBackground() != null) {
-                    b.getBackground().mutate().setColorFilter(bgS, android.graphics.PorterDuff.Mode.MULTIPLY);
+                int defaultColor = bgS;
+                if (b.getId() == R.id.btn_play_pause) {
+                    defaultColor = android.graphics.Color.parseColor("#00d4ff");
+                    b.setTextColor(android.graphics.Color.WHITE);
+                } else {
+                    b.setTextColor(textP);
                 }
-                b.setTextColor(textP);
+                
+                android.graphics.drawable.StateListDrawable sld = new android.graphics.drawable.StateListDrawable();
+                android.graphics.drawable.ColorDrawable pressed = new android.graphics.drawable.ColorDrawable(android.graphics.Color.GRAY);
+                android.graphics.drawable.ColorDrawable normal = new android.graphics.drawable.ColorDrawable(defaultColor);
+                sld.addState(new int[]{android.R.attr.state_pressed}, pressed);
+                sld.addState(new int[]{}, normal);
+                b.setBackgroundDrawable(sld);
             }
         } else if (v instanceof EditText) {
             EditText e = (EditText) v;

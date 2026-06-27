@@ -1,5 +1,5 @@
 @echo off
-set SDKROOT=C:\Users\Will\OneDrive\github\copilot cli\minipc\android-sdk
+set SDKROOT=C:\Users\Will\OneDrive\github\copilot cli\minipc\development\android-sdk
 set BUILD_TOOLS=%SDKROOT%\build-tools\29.0.3
 set PLATFORM=%SDKROOT%\platforms\android-10
 set JAVA_HOME=C:\Program Files\Java\jdk1.8.0_481

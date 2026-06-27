@@ -34,6 +34,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <activity android:name=".UnlockActivity" android:exported="true" android:label="Unlock Tablet" />
     </application>
 
 </manifest>

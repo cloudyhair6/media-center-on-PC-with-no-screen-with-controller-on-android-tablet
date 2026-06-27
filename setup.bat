@@ -2,7 +2,7 @@
 echo ===================================================
 echo Setting up MiniPC Media Center Environment
 echo ===================================================
-cd cd pc_app
+cd pc_app
 echo [1/4] Clearing Cache...
 pip cache purge
 
