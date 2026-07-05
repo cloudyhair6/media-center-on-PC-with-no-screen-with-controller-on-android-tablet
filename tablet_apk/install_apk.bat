@@ -5,9 +5,10 @@ echo ===========================================================
 echo Ensure your tablet is connected via USB.
 pause
 echo Installing APK...
-platform-tools\adb.exe install -r app.apk
+..\development\platform-tools\adb.exe uninstall com.minipc.kiosk
+..\development\platform-tools\adb.exe install -r app.apk
 echo.
 echo Launching App...
-platform-tools\adb.exe shell am start -n com.minipc.kiosk/.MainActivity
+..\development\platform-tools\adb.exe shell am start -n com.minipc.kiosk/.MainActivity
 echo Done!
 pause

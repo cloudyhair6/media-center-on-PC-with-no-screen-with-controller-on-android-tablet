@@ -40,6 +40,7 @@ class SpotifyControl:
     _last_metadata = {"playing": False, "artist": "", "title": "", "album": "", "uri": "", "artwork": ""}
     _last_uri = ""
     _last_artwork_url = ""
+    _last_album = ""
 
     @staticmethod
     def get_artwork(uri: str) -> str:
@@ -281,11 +282,20 @@ class SpotifyControl:
                 uri = cp.get("uri", "")
 
                 if uri != SpotifyControl._last_uri and uri:
-                    SpotifyControl._last_artwork_url = SpotifyControl.get_artwork(uri)
+                    # Fetch extra metadata (album name and artwork) using lookup
                     SpotifyControl._last_uri = uri
+                    try:
+                        lookup_out = SpotifyControl._run_cli(["lookup", uri, "--format", "json"])
+                        ent = json.loads(lookup_out).get("entities", [{}])[0]
+                        SpotifyControl._last_artwork_url = ent.get("image_url", "")
+                        SpotifyControl._last_album = ent.get("parent", {}).get("name", "")
+                    except Exception:
+                        SpotifyControl._last_artwork_url = SpotifyControl.get_artwork(uri)
+                        SpotifyControl._last_album = ""
                 elif not uri:
                     SpotifyControl._last_artwork_url = ""
                     SpotifyControl._last_uri = ""
+                    SpotifyControl._last_album = ""
 
                 title = desc
                 artist = ""
@@ -298,12 +308,17 @@ class SpotifyControl:
                         break
 
                 is_ad = uri.startswith("spotify:ad:")
+                
+                # Use context_description as fallback if album is missing
+                album_text = SpotifyControl._last_album
+                if not album_text:
+                    album_text = cp.get("context_description", "")
 
                 SpotifyControl._last_metadata = {
                     "playing": is_playing,
                     "title": title,
                     "artist": artist,
-                    "album": cp.get("context_description", ""),
+                    "album": album_text,
                     "uri": uri,
                     "artwork": SpotifyControl._last_artwork_url,
                     "is_ad": is_ad

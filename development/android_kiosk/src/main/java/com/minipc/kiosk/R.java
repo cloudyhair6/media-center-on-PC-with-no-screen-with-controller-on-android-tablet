@@ -12,6 +12,9 @@ public final class R {
     }
     public static final class drawable {
         public static final int custom_progress=0x7f020000;
+        public static final int ic_error=0x7f020001;
+        public static final int ic_folder=0x7f020002;
+        public static final int ic_loading=0x7f020003;
     }
     public static final class id {
         public static final int audio_channel_text=0x7f04004a;

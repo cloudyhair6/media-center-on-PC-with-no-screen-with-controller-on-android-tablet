@@ -5,6 +5,8 @@ set PLATFORM=%SDKROOT%\platforms\android-10
 set JAVA_HOME=C:\Program Files\Java\jdk1.8.0_481
 set PATH=%JAVA_HOME%\bin;%PATH%
 
+if exist app.apk del /q app.apk
+
 if not exist bin mkdir bin
 echo [1] Generating R.java and Packaging APK resources...
 "%BUILD_TOOLS%\aapt.exe" package -f -m -J src\main\java -M src\main\AndroidManifest.xml -S src\main\res -I "%PLATFORM%\android.jar" -F bin\app.unaligned.apk

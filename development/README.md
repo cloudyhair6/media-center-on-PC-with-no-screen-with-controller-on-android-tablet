@@ -1,1 +1,1 @@
-you need to get android-sdk on your own i can't upload it to github
+you need to get android-sdk on your own i can't upload it to github, if you look through the development/android_kiosk/build_apk.bat you will find out the java version you need and the sdk version, also you need to change the SDKROOT for it to work.

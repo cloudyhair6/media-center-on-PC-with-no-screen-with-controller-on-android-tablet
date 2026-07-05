@@ -1003,43 +1003,49 @@ public class MainActivity extends Activity {
                 if (prefs.getBoolean("show_album_art", true)) {
                     final ImageView img = new ImageView(MainActivity.this);
                     img.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
-                    img.setBackgroundColor(0xFF111827);
                     img.setPadding(0, 0, 15, 0);
                     row.addView(img);
                     
-                    if (!artUriToLoad.isEmpty()) {
-                        api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(artUriToLoad), new ApiClient.Callback() {
-                            @Override public void onSuccess(String response) {
-                                try {
-                                    JSONObject j = new JSONObject(response);
-                                    final String imgUrl = j.optString("thumbnail_url", "");
-                                    final String highResUrl = j.optString("high_res_url", "");
-                                    if (!imgUrl.isEmpty()) {
-                                        new AsyncTask<Void, Void, Bitmap>() {
-                                            @Override protected Bitmap doInBackground(Void... voids) {
-                                                try { return BitmapFactory.decodeStream(new URL(imgUrl).openStream()); } catch (Exception e) { return null; }
-                                            }
-                                            @Override protected void onPostExecute(Bitmap b) {
-                                                if (b != null) {
-                                                    img.setImageBitmap(b);
-                                                    if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
-                                                        new AsyncTask<Void, Void, Bitmap>() {
-                                                            @Override protected Bitmap doInBackground(Void... voids) {
-                                                                try { return BitmapFactory.decodeStream(new URL(highResUrl).openStream()); } catch (Exception e) { return null; }
-                                                            }
-                                                            @Override protected void onPostExecute(Bitmap hb) {
-                                                                if (hb != null) img.setImageBitmap(hb);
-                                                            }
-                                                        }.execute();
-                                                    }
+                    if (type.equals("folder") && artUriToLoad.isEmpty()) {
+                        img.setImageResource(R.drawable.ic_folder);
+                    } else {
+                        img.setImageResource(R.drawable.ic_loading);
+                        if (!artUriToLoad.isEmpty()) {
+                            api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(artUriToLoad), new ApiClient.Callback() {
+                                @Override public void onSuccess(String response) {
+                                    try {
+                                        JSONObject j = new JSONObject(response);
+                                        final String imgUrl = j.optString("thumbnail_url", "");
+                                        final String highResUrl = j.optString("high_res_url", "");
+                                        if (!imgUrl.isEmpty()) {
+                                            new AsyncTask<Void, Void, Bitmap>() {
+                                                @Override protected Bitmap doInBackground(Void... voids) {
+                                                    try { return BitmapFactory.decodeStream(new URL(imgUrl).openStream()); } catch (Exception e) { return null; }
                                                 }
-                                            }
-                                        }.execute();
-                                    }
-                                } catch (Exception e) {}
-                            }
-                            @Override public void onError(String error) {}
-                        });
+                                                @Override protected void onPostExecute(Bitmap b) {
+                                                    if (b != null) {
+                                                        img.setImageBitmap(b);
+                                                        if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
+                                                            new AsyncTask<Void, Void, Bitmap>() {
+                                                                @Override protected Bitmap doInBackground(Void... voids) {
+                                                                    try { return BitmapFactory.decodeStream(new URL(highResUrl).openStream()); } catch (Exception e) { return null; }
+                                                                }
+                                                                @Override protected void onPostExecute(Bitmap hb) {
+                                                                    if (hb != null) img.setImageBitmap(hb);
+                                                                }
+                                                            }.execute();
+                                                        }
+                                                    } else img.setImageResource(R.drawable.ic_error);
+                                                }
+                                            }.execute();
+                                        } else img.setImageResource(R.drawable.ic_error);
+                                    } catch (Exception e) { img.setImageResource(R.drawable.ic_error); }
+                                }
+                                @Override public void onError(String error) { img.setImageResource(R.drawable.ic_error); }
+                            });
+                        } else {
+                            img.setImageResource(R.drawable.ic_error);
+                        }
                     }
                 }
                 
@@ -1095,7 +1101,7 @@ public class MainActivity extends Activity {
                             if (prefs.getBoolean("show_album_art", true) && !uri.isEmpty()) {
                                 final ImageView img = new ImageView(MainActivity.this);
                                 img.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
-                                img.setBackgroundColor(0xFF111827);
+                                img.setImageResource(R.drawable.ic_loading);
                                 img.setPadding(0, 0, 15, 0);
                                 row.addView(img);
                                 
@@ -1126,11 +1132,11 @@ public class MainActivity extends Activity {
                                                                     }
                                                                 }.execute();
                                                             }
-                                                        }
+                                                        } else img.setImageResource(R.drawable.ic_error);
                                                     }
                                                 }.execute();
-                                            }
-                                        } catch (Exception e) {}
+                                            } else img.setImageResource(R.drawable.ic_error);
+                                        } catch (Exception e) { img.setImageResource(R.drawable.ic_error); }
                                     }
                                     @Override public void onError(String error) {}
                                 });
@@ -1470,8 +1476,7 @@ public class MainActivity extends Activity {
     private void loadAlbumArt(final String uri) {
         if (uri.equals(lastArtUri)) return;
         lastArtUri = uri;
-        final TextView artError = (TextView) findViewById(R.id.np_art_error);
-        if (artError != null) artError.setVisibility(View.GONE);
+        npArtwork.setImageResource(R.drawable.ic_loading);
         
         api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
             @Override public void onSuccess(String response) {
@@ -1490,7 +1495,6 @@ public class MainActivity extends Activity {
                             @Override protected void onPostExecute(Bitmap b) {
                                 if (b != null) {
                                     npArtwork.setImageBitmap(b);
-                                    if (artError != null) artError.setVisibility(View.GONE);
                                     if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
                                         new AsyncTask<Void, Void, Bitmap>() {
                                             @Override protected Bitmap doInBackground(Void... voids) {
@@ -1502,13 +1506,13 @@ public class MainActivity extends Activity {
                                         }.execute();
                                     }
                                 }
-                                else if (artError != null) artError.setVisibility(View.VISIBLE);
+                                else npArtwork.setImageResource(R.drawable.ic_error);
                             }
                         }.execute();
-                    } else if (artError != null) artError.setVisibility(View.VISIBLE);
-                } catch (Exception e) { if (artError != null) artError.setVisibility(View.VISIBLE); }
+                    } else npArtwork.setImageResource(R.drawable.ic_error);
+                } catch (Exception e) { npArtwork.setImageResource(R.drawable.ic_error); }
             }
-            @Override public void onError(String error) { if (artError != null) artError.setVisibility(View.VISIBLE); }
+            @Override public void onError(String error) { npArtwork.setImageResource(R.drawable.ic_error); }
         });
     }
 

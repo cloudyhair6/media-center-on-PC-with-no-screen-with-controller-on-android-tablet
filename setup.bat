@@ -2,7 +2,7 @@
 echo ===================================================
 echo Setting up MiniPC Media Center Environment
 echo ===================================================
-cd pc_app
+cd cd pc_app
 echo [1/4] Clearing Cache...
 pip cache purge
 
@@ -22,7 +22,7 @@ python -m pip install --upgrade pip
 
 echo.
 echo [4/4] Installing Required Packages...
-pip install -r pc_app\requirements.txt
+pip install -r requirements.txt
 if errorlevel 1 (
     echo [ERROR] Failed to install packages. Check requirements.txt.
     pause
