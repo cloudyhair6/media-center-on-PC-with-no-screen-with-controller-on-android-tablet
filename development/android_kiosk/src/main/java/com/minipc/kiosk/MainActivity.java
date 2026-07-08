@@ -23,6 +23,7 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.RelativeLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Spinner;
@@ -51,7 +52,6 @@ public class MainActivity extends Activity {
 
     // Tabs
     private LinearLayout tabMusic;
-    private LinearLayout tabMovies;
     private ScrollView tabSettings;
     private LinearLayout tabPower;
     private Button[] tabButtons;
@@ -73,9 +73,7 @@ public class MainActivity extends Activity {
     private boolean isNpPlaying = false;
     private ImageView npArtwork;
     // UI Elements - Movies
-    private LinearLayout movieBrowserView, moviePlayerView;
     private TextView currentPathText, movieTitleText, movieTimeText, movieInfoText;
-    private LinearLayout filesList;
     private String currentLibraryFolderUri = null;
     private JSONArray cachedLibraryItems = null;
     // UI Elements - Settings
@@ -88,7 +86,6 @@ public class MainActivity extends Activity {
     private boolean isTrackingVolume = false;
 
     private Handler handler = new Handler();
-    private boolean isPlayingMovie = false;
     private String currentMoviePath = "";
     private boolean allowSettings = false;
     private boolean shuffleOn = false;
@@ -164,35 +161,6 @@ public class MainActivity extends Activity {
         }
     };
 
-    private Runnable pollMovieInfo = new Runnable() {
-        @Override
-        public void run() {
-            if (isPlayingMovie) {
-                api.get("/api/movies/info", new ApiClient.Callback() {
-                    @Override
-                    public void onSuccess(String response) {
-                        try {
-                            JSONObject json = new JSONObject(response);
-                            int time = json.optInt("time", 0);
-                            int length = json.optInt("length", 0);
-                            String state = json.optString("state", "");
-                            movieTimeText.setText(formatTime(time) + " / " + formatTime(length));
-                            String res = json.optString("resolution", "");
-                            String codec = json.optString("codec", "");
-                            movieInfoText.setText(res + " | " + codec);
-                            
-                            if (state.equals("stopped") && time == 0 && length == 0) {
-                                // Movie might have ended
-                            }
-                        } catch (Exception e) {}
-                    }
-                    @Override
-                    public void onError(String error) {}
-                });
-            }
-            handler.postDelayed(this, 2000);
-        }
-    };
 
     private Runnable pollSystemStats = new Runnable() {
         @Override
@@ -320,7 +288,6 @@ public class MainActivity extends Activity {
 
         handler.post(pollSpotify);
         handler.post(progressExtrapolator);
-        handler.post(pollMovieInfo);
         handler.post(pollSystemStats);
         handler.post(pollUnlock);
         handler.post(blockSettings);
@@ -330,6 +297,9 @@ public class MainActivity extends Activity {
         if (!lastIp.isEmpty()) {
             connectToIp(lastIp);
         }
+        
+        // Apply theme on startup
+        applyTheme(prefs.getString("theme", "dark"));
     }
 
     private void initViews() {
@@ -341,13 +311,11 @@ public class MainActivity extends Activity {
         try { statusToast = (TextView) findViewById(R.id.status_toast); } catch (Exception e) { android.util.Log.e("DEBUG", "status_toast failed", e); }
 
         try { tabMusic = (LinearLayout) findViewById(R.id.tab_music); } catch (Exception e) { android.util.Log.e("DEBUG", "tab_music failed", e); }
-        try { tabMovies = (LinearLayout) findViewById(R.id.tab_movies); } catch (Exception e) { android.util.Log.e("DEBUG", "tab_movies failed", e); }
         try { tabSettings = (ScrollView) findViewById(R.id.tab_settings); } catch (Exception e) { android.util.Log.e("DEBUG", "tab_settings failed", e); }
         try { tabPower = (LinearLayout) findViewById(R.id.tab_power); } catch (Exception e) { android.util.Log.e("DEBUG", "tab_power failed", e); }
 
         try { tabButtons = new Button[]{
             (Button) findViewById(R.id.tab_btn_music),
-            (Button) findViewById(R.id.tab_btn_movies),
             (Button) findViewById(R.id.tab_btn_settings),
             (Button) findViewById(R.id.tab_btn_power)
         }; } catch (Exception e) { android.util.Log.e("DEBUG", "tabButtons failed", e); }
@@ -385,14 +353,6 @@ public class MainActivity extends Activity {
             }
         } catch (Exception e) {}
 
-        try { movieBrowserView = (LinearLayout) findViewById(R.id.movie_browser_view); } catch (Exception e) { android.util.Log.e("DEBUG", "movieBrowserView failed", e); }
-        try { moviePlayerView = (LinearLayout) findViewById(R.id.movie_player_view); } catch (Exception e) { android.util.Log.e("DEBUG", "moviePlayerView failed", e); }
-        try { currentPathText = (TextView) findViewById(R.id.current_path); } catch (Exception e) { android.util.Log.e("DEBUG", "currentPathText failed", e); }
-        try { filesList = (LinearLayout) findViewById(R.id.files_list); } catch (Exception e) { android.util.Log.e("DEBUG", "filesList failed", e); }
-        try { movieTitleText = (TextView) findViewById(R.id.movie_title); } catch (Exception e) { android.util.Log.e("DEBUG", "movieTitleText failed", e); }
-        try { movieTimeText = (TextView) findViewById(R.id.movie_time); } catch (Exception e) { android.util.Log.e("DEBUG", "movieTimeText failed", e); }
-        try { movieInfoText = (TextView) findViewById(R.id.movie_info); } catch (Exception e) { android.util.Log.e("DEBUG", "movieInfoText failed", e); }
-
         try { toggleAlbumArt = (ToggleButton) findViewById(R.id.toggle_album_art); } catch (Exception e) { android.util.Log.e("DEBUG", "toggleAlbumArt failed", e); }
         try { btnTheme = (Button) findViewById(R.id.btn_theme); } catch (Exception e) { android.util.Log.e("DEBUG", "btnTheme failed", e); }
         try { cpuText = (TextView) findViewById(R.id.cpu_text); } catch (Exception e) {}
@@ -425,15 +385,24 @@ public class MainActivity extends Activity {
                 npArtist.setText("");
                 npAlbum.setText("");
                 npArtwork.setImageBitmap(null);
-                volLabel.setText("--%");
+                ProgressBar npArtProgress = (ProgressBar) findViewById(R.id.np_art_progress);
+                if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
+                LinearLayout npArtErrorLayout = (LinearLayout) findViewById(R.id.np_art_error_layout);
+                if (npArtErrorLayout != null) npArtErrorLayout.setVisibility(View.GONE);
                 
+                currentNpUri = "";
+                lastArtUri = "";
+                
+                if (npTimeCurrent != null) npTimeCurrent.setText("--:--");
+                if (npTimeTotal != null) npTimeTotal.setText("--:--");
+                if (npProgress != null) npProgress.setProgress(0);
+                
+                volLabel.setText("--%");
                 // Immediately poll the server again for everything
                 handler.removeCallbacks(pollSpotify);
-                handler.removeCallbacks(pollMovieInfo);
                 handler.removeCallbacks(pollSystemStats);
                 
                 handler.post(pollSpotify);
-                handler.post(pollMovieInfo);
                 handler.post(pollSystemStats);
             }
         });
@@ -584,9 +553,8 @@ public class MainActivity extends Activity {
 
     private void switchTab(int index) {
         tabMusic.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
-        tabMovies.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
-        tabSettings.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
-        tabPower.setVisibility(index == 3 ? View.VISIBLE : View.GONE);
+        tabSettings.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
+        tabPower.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
 
         for (int i = 0; i < tabButtons.length; i++) {
             tabButtons[i].setTextColor(i == index ? 0xFF00d4ff : 0xFF8892b0);
@@ -594,13 +562,11 @@ public class MainActivity extends Activity {
         }
 
         TextView title = (TextView) findViewById(R.id.tab_title);
-        if (index == 0) title.setText("Music");
-        if (index == 1) {
-            title.setText("Movies");
-            loadMovies("C:\\");
+        if (title != null) {
+            if (index == 0) title.setText("Music");
+            if (index == 1) title.setText("Settings");
+            if (index == 2) title.setText("Power");
         }
-        if (index == 2) title.setText("Settings");
-        if (index == 3) title.setText("Power");
     }
 
     private void switchMusicSubTab(int index) {
@@ -775,41 +741,6 @@ public class MainActivity extends Activity {
         });
         
         // Movie controls setup
-        ((Button) findViewById(R.id.btn_go_up)).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                String cur = currentPathText.getText().toString();
-                int idx = cur.lastIndexOf("\\");
-                if (idx > 0) {
-                    loadMovies(cur.substring(0, idx));
-                } else if (idx == 0) {
-                    loadMovies("C:\\");
-                }
-            }
-        });
-        
-        ((Button) findViewById(R.id.btn_movie_play_pause)).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendCommand("/api/movies/control?action=play_pause"); }
-        });
-        ((Button) findViewById(R.id.btn_movie_seek_fwd)).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendCommand("/api/movies/control?action=seek_fwd"); }
-        });
-        ((Button) findViewById(R.id.btn_movie_seek_back)).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendCommand("/api/movies/control?action=seek_back"); }
-        });
-        ((Button) findViewById(R.id.btn_movie_stop)).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { 
-                sendCommand("/api/movies/control?action=stop"); 
-                isPlayingMovie = false;
-                moviePlayerView.setVisibility(View.GONE);
-                movieBrowserView.setVisibility(View.VISIBLE);
-            }
-        });
-        ((Button) findViewById(R.id.btn_movie_vol_down)).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendCommand("/api/movies/control?action=volume_down"); }
-        });
-        ((Button) findViewById(R.id.btn_movie_vol_up)).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendCommand("/api/movies/control?action=volume_up"); }
-        });
     }
 
     private void renderSearchResults(String jsonStr) {
@@ -827,23 +758,112 @@ public class MainActivity extends Activity {
                     row.setGravity(android.view.Gravity.CENTER_VERTICAL);
                     
                     // Artwork (Left)
-                    ImageView iv = new ImageView(MainActivity.this);
-                    iv.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
-                    iv.setPadding(0, 0, 15, 0);
-                    row.addView(iv);
-                    final String imgUrl = item.optString("image", "");
-                    if (!imgUrl.isEmpty()) {
-                        final ImageView fIv = iv;
-                        new Thread(new Runnable() {
-                            public void run() {
-                                try {
-                                    java.io.InputStream in = new java.net.URL(imgUrl).openStream();
-                                    final android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(in);
-                                    runOnUiThread(new Runnable() { public void run() { fIv.setImageBitmap(bmp); } });
-                                } catch(Exception e) {}
+                    final RelativeLayout artContainer = new RelativeLayout(MainActivity.this);
+                    artContainer.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
+                    artContainer.setPadding(0, 0, 15, 0);
+                    row.addView(artContainer);
+                    
+                    final ImageView iv = new ImageView(MainActivity.this);
+                    iv.setLayoutParams(new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.FILL_PARENT, RelativeLayout.LayoutParams.FILL_PARENT));
+                    artContainer.addView(iv);
+                    
+                    final ProgressBar pb = new ProgressBar(MainActivity.this);
+                    RelativeLayout.LayoutParams pbParams = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT);
+                    pbParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+                    pb.setLayoutParams(pbParams);
+                    pb.setVisibility(View.GONE);
+                    artContainer.addView(pb);
+                    
+                    final LinearLayout errLayout = new LinearLayout(MainActivity.this);
+                    errLayout.setOrientation(LinearLayout.VERTICAL);
+                    errLayout.setGravity(android.view.Gravity.CENTER);
+                    RelativeLayout.LayoutParams errParams = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT);
+                    errParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+                    errLayout.setLayoutParams(errParams);
+                    errLayout.setVisibility(View.GONE);
+                    
+                    final TextView errText = new TextView(MainActivity.this);
+                    errText.setTextColor(0xFFFFFFFF);
+                    errText.setTextSize(10);
+                    errText.setGravity(android.view.Gravity.CENTER);
+                    errLayout.addView(errText);
+                    
+                    final Button retryBtn = new Button(MainActivity.this);
+                    retryBtn.setText("Retry");
+                    retryBtn.setTextSize(10);
+                    retryBtn.setPadding(2, 2, 2, 2);
+                    retryBtn.setTextColor(0xFFFFFFFF);
+                    retryBtn.setBackgroundColor(0x44FFFFFF);
+                    errLayout.addView(retryBtn);
+                    
+                    artContainer.addView(errLayout);
+
+                    final String uri = item.optString("uri", "");
+                    
+                    final Runnable fetchImage = new Runnable() {
+                        @Override
+                        public void run() {
+                            iv.setImageBitmap(null);
+                            errLayout.setVisibility(View.GONE);
+                            
+                            if (uri.isEmpty()) {
+                                pb.setVisibility(View.GONE);
+                                iv.setImageResource(R.drawable.ic_error);
+                                errText.setText("URL missing");
+                                errLayout.setVisibility(View.VISIBLE);
+                                return;
                             }
-                        }).start();
-                    }
+                            
+                            pb.setVisibility(View.VISIBLE);
+                            
+                            api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
+                                @Override public void onSuccess(String response) {
+                                    try {
+                                        JSONObject j = new JSONObject(response);
+                                        final String imgUrl = j.optString("thumbnail_url", "");
+                                        final String highResUrl = j.optString("high_res_url", "");
+                                        if (!imgUrl.isEmpty()) {
+                                            new AsyncTask<Void, Void, Bitmap>() {
+                                                @Override protected Bitmap doInBackground(Void... voids) {
+                                                    try { return BitmapFactory.decodeStream(new URL(imgUrl).openStream()); } catch (Exception e) { return null; }
+                                                }
+                                                @Override protected void onPostExecute(Bitmap b) {
+                                                    pb.setVisibility(View.GONE);
+                                                    if (b != null) {
+                                                        iv.setImageBitmap(b);
+                                                        if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
+                                                            new AsyncTask<Void, Void, Bitmap>() {
+                                                                @Override protected Bitmap doInBackground(Void... voids) {
+                                                                    try { return BitmapFactory.decodeStream(new URL(highResUrl).openStream()); } catch (Exception e) { return null; }
+                                                                }
+                                                                @Override protected void onPostExecute(Bitmap hb) {
+                                                                    if (hb != null) iv.setImageBitmap(hb);
+                                                                }
+                                                            }.execute();
+                                                        }
+                                                    } else showError("Download failed");
+                                                }
+                                            }.execute();
+                                        } else showError("Download failed");
+                                    } catch (Exception e) { showError("Download failed"); }
+                                }
+                                @Override public void onError(String error) { showError("Download failed"); }
+                                
+                                private void showError(String msg) {
+                                    pb.setVisibility(View.GONE);
+                                    iv.setImageResource(R.drawable.ic_error);
+                                    errText.setText(msg);
+                                    errLayout.setVisibility(View.VISIBLE);
+                                }
+                            });
+                        }
+                    };
+                    
+                    retryBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) { fetchImage.run(); }
+                    });
+                    
+                    fetchImage.run();
 
                     // Text (Middle)
                     LinearLayout textCol = new LinearLayout(MainActivity.this);
@@ -868,42 +888,46 @@ public class MainActivity extends Activity {
                     LinearLayout btns = new LinearLayout(MainActivity.this);
                     btns.setOrientation(LinearLayout.HORIZONTAL);
                     
+                    String type = item.optString("type", "");
+                    
                     Button playBtn = new Button(MainActivity.this);
                     playBtn.setText("Play");
                     playBtn.setOnClickListener(new View.OnClickListener() {
-                        @Override public void onClick(View v) { sendCommand("/api/spotify/play?uri=" + java.net.URLEncoder.encode(item.optString("uri"))); }
+                        @Override public void onClick(View v) { sendCommand("/api/spotify/play?uri=" + java.net.URLEncoder.encode(uri)); }
                     });
                     btns.addView(playBtn);
                     
                     Button queueBtn = new Button(MainActivity.this);
                     queueBtn.setText("Queue");
                     queueBtn.setOnClickListener(new View.OnClickListener() {
-                        @Override public void onClick(View v) { sendCommand("/api/spotify/queue/add?uri=" + java.net.URLEncoder.encode(item.optString("uri"))); }
+                        @Override public void onClick(View v) { sendCommand("/api/spotify/queue/add?uri=" + java.net.URLEncoder.encode(uri)); }
                     });
                     btns.addView(queueBtn);
 
                     Button likeBtn = new Button(MainActivity.this);
-                    likeBtn.setText("Like");
+                    if (type.equals("album") || type.equals("playlist")) {
+                        likeBtn.setText("Add to Library");
+                    } else {
+                        likeBtn.setText("Like");
+                    }
                     likeBtn.setOnClickListener(new View.OnClickListener() {
-                        @Override public void onClick(View v) { sendCommand("/api/spotify/library/add?uri=" + java.net.URLEncoder.encode(item.optString("uri"))); }
+                        @Override public void onClick(View v) { sendCommand("/api/spotify/library/add?uri=" + java.net.URLEncoder.encode(uri)); }
                     });
                     btns.addView(likeBtn);
 
-                    Button playlistBtn = new Button(MainActivity.this);
-                    playlistBtn.setText("Add to Playlist");
-                    playlistBtn.setOnClickListener(new View.OnClickListener() {
-                        @Override public void onClick(View v) { showPlaylistSelector(item.optString("uri")); }
-                    });
-                    btns.addView(playlistBtn);
+                    if (type.equals("track")) {
+                        Button playlistBtn = new Button(MainActivity.this);
+                        playlistBtn.setText("Add to Playlist");
+                        playlistBtn.setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View v) { showPlaylistSelector(uri); }
+                        });
+                        btns.addView(playlistBtn);
+                    }
                     
                     row.addView(btns);
                     container.addView(row);
-                    
-                    String t = prefs.getString("theme", "dark");
-                    int bgS = t.equals("light") ? android.graphics.Color.parseColor("#ffffff") : android.graphics.Color.parseColor("#111827");
-                    int txtP = t.equals("light") ? android.graphics.Color.parseColor("#1a1a2e") : android.graphics.Color.parseColor("#ffffff");
-                    applyThemeToView(row, android.graphics.Color.TRANSPARENT, bgS, txtP, txtP, t.equals("native"));
                 }
+                applyTheme(prefs.getString("theme", "dark"));
             }
         } catch (Exception e) {}
     }
@@ -1001,17 +1025,71 @@ public class MainActivity extends Activity {
                 }
                 
                 if (prefs.getBoolean("show_album_art", true)) {
-                    final ImageView img = new ImageView(MainActivity.this);
-                    img.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
-                    img.setPadding(0, 0, 15, 0);
-                    row.addView(img);
+                    final RelativeLayout artContainer = new RelativeLayout(MainActivity.this);
+                    artContainer.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
+                    artContainer.setPadding(0, 0, 15, 0);
+                    row.addView(artContainer);
                     
-                    if (type.equals("folder") && artUriToLoad.isEmpty()) {
-                        img.setImageResource(R.drawable.ic_folder);
-                    } else {
-                        img.setImageResource(R.drawable.ic_loading);
-                        if (!artUriToLoad.isEmpty()) {
-                            api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(artUriToLoad), new ApiClient.Callback() {
+                    final ImageView img = new ImageView(MainActivity.this);
+                    img.setLayoutParams(new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.FILL_PARENT, RelativeLayout.LayoutParams.FILL_PARENT));
+                    artContainer.addView(img);
+                    
+                    final ProgressBar pb = new ProgressBar(MainActivity.this);
+                    RelativeLayout.LayoutParams pbParams = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT);
+                    pbParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+                    pb.setLayoutParams(pbParams);
+                    pb.setVisibility(View.GONE);
+                    artContainer.addView(pb);
+                    
+                    final LinearLayout errLayout = new LinearLayout(MainActivity.this);
+                    errLayout.setOrientation(LinearLayout.VERTICAL);
+                    errLayout.setGravity(android.view.Gravity.CENTER);
+                    RelativeLayout.LayoutParams errParams = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT);
+                    errParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+                    errLayout.setLayoutParams(errParams);
+                    errLayout.setVisibility(View.GONE);
+                    
+                    final TextView errText = new TextView(MainActivity.this);
+                    errText.setTextColor(0xFFFFFFFF);
+                    errText.setTextSize(10);
+                    errText.setGravity(android.view.Gravity.CENTER);
+                    errLayout.addView(errText);
+                    
+                    final Button retryBtn = new Button(MainActivity.this);
+                    retryBtn.setText("Retry");
+                    retryBtn.setTextSize(10);
+                    retryBtn.setPadding(2, 2, 2, 2);
+                    retryBtn.setTextColor(0xFFFFFFFF);
+                    retryBtn.setBackgroundColor(0x44FFFFFF);
+                    errLayout.addView(retryBtn);
+                    
+                    artContainer.addView(errLayout);
+                    
+                    final String finalArtUriToLoad = artUriToLoad;
+                    
+                    final Runnable fetchImage = new Runnable() {
+                        @Override
+                        public void run() {
+                            img.setImageBitmap(null);
+                            errLayout.setVisibility(View.GONE);
+                            
+                            if (type.equals("folder") && finalArtUriToLoad.isEmpty()) {
+                                pb.setVisibility(View.GONE);
+                                img.setImageResource(R.drawable.ic_folder);
+                                return;
+                            }
+                            
+                            if (finalArtUriToLoad.isEmpty()) {
+                                pb.setVisibility(View.GONE);
+                                img.setImageResource(R.drawable.ic_error);
+                                errText.setText("URL missing");
+                                errLayout.setVisibility(View.VISIBLE);
+                                return;
+                            }
+                            
+                            pb.setVisibility(View.VISIBLE);
+                            
+                            api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(finalArtUriToLoad), new ApiClient.Callback() {
                                 @Override public void onSuccess(String response) {
                                     try {
                                         JSONObject j = new JSONObject(response);
@@ -1023,6 +1101,7 @@ public class MainActivity extends Activity {
                                                     try { return BitmapFactory.decodeStream(new URL(imgUrl).openStream()); } catch (Exception e) { return null; }
                                                 }
                                                 @Override protected void onPostExecute(Bitmap b) {
+                                                    pb.setVisibility(View.GONE);
                                                     if (b != null) {
                                                         img.setImageBitmap(b);
                                                         if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
@@ -1035,44 +1114,100 @@ public class MainActivity extends Activity {
                                                                 }
                                                             }.execute();
                                                         }
-                                                    } else img.setImageResource(R.drawable.ic_error);
+                                                    } else showError("Download failed");
                                                 }
                                             }.execute();
-                                        } else img.setImageResource(R.drawable.ic_error);
-                                    } catch (Exception e) { img.setImageResource(R.drawable.ic_error); }
+                                        } else showError("Download failed");
+                                    } catch (Exception e) { showError("Download failed"); }
                                 }
-                                @Override public void onError(String error) { img.setImageResource(R.drawable.ic_error); }
+                                @Override public void onError(String error) { showError("Download failed"); }
+                                
+                                private void showError(String msg) {
+                                    pb.setVisibility(View.GONE);
+                                    img.setImageResource(R.drawable.ic_error);
+                                    errText.setText(msg);
+                                    errLayout.setVisibility(View.VISIBLE);
+                                }
                             });
-                        } else {
-                            img.setImageResource(R.drawable.ic_error);
                         }
-                    }
+                    };
+                    
+                    retryBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) { fetchImage.run(); }
+                    });
+                    
+                    fetchImage.run();
                 }
                 
-                Button btn = new Button(MainActivity.this);
+                LinearLayout textCol = new LinearLayout(MainActivity.this);
+                textCol.setOrientation(LinearLayout.VERTICAL);
+                textCol.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+                TextView tvName = new TextView(MainActivity.this);
                 String namePrefix = "";
                 if (type.equals("folder")) {
                     namePrefix = expandedFolders.contains(uri) ? "📂 " : "📁 ";
                 }
-                btn.setText(namePrefix + item.optString("name", "Unknown"));
-                btn.setTextColor(type.equals("folder") ? 0xFF00d4ff : 0xFFFFFFFF);
-                btn.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-                btn.setGravity(android.view.Gravity.LEFT | android.view.Gravity.CENTER_VERTICAL);
-                btn.setBackgroundColor(android.graphics.Color.TRANSPARENT);
-                btn.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) {
-                        if (type.equals("folder")) {
+                tvName.setText(namePrefix + item.optString("name", "Unknown"));
+                tvName.setTextColor(type.equals("folder") ? 0xFF00d4ff : 0xFFFFFFFF);
+                tvName.setTextSize(18);
+                textCol.addView(tvName);
+                
+                TextView tvArtist = new TextView(MainActivity.this);
+                tvArtist.setText(item.optString("artist", ""));
+                tvArtist.setTextSize(14);
+                tvArtist.setTextColor(0xFF8892b0);
+                textCol.addView(tvArtist);
+                
+                row.addView(textCol);
+                
+                LinearLayout btns = new LinearLayout(MainActivity.this);
+                btns.setOrientation(LinearLayout.HORIZONTAL);
+                
+                if (type.equals("folder")) {
+                    Button openBtn = new Button(MainActivity.this);
+                    openBtn.setText(expandedFolders.contains(uri) ? "Close folder" : "Open folder");
+                    openBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) {
                             if (expandedFolders.contains(uri)) expandedFolders.remove(uri);
                             else expandedFolders.add(uri);
                             renderLibraryFolder();
-                        } else if (!uri.isEmpty()) {
+                        }
+                    });
+                    btns.addView(openBtn);
+                }
+                
+                if (!uri.isEmpty()) {
+                    Button playBtn = new Button(MainActivity.this);
+                    playBtn.setText("Play");
+                    playBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) {
                             sendCommand("/api/spotify/play?uri=" + java.net.URLEncoder.encode(uri));
                         }
-                    }
-                });
-                row.addView(btn);
+                    });
+                    btns.addView(playBtn);
+                    
+                    Button removeBtn = new Button(MainActivity.this);
+                    removeBtn.setText("Remove from library");
+                    removeBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) {
+                            api.get("/api/spotify/library/remove?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
+                                @Override public void onSuccess(String response) {
+                                    runOnUiThread(new Runnable() {
+                                        @Override public void run() { loadLibrary(); }
+                                    });
+                                }
+                                @Override public void onError(String error) {}
+                            });
+                        }
+                    });
+                    btns.addView(removeBtn);
+                }
+                
+                row.addView(btns);
                 container.addView(row);
             }
+            applyTheme(prefs.getString("theme", "dark"));
         } catch (Exception e) {}
     }
 
@@ -1098,48 +1233,111 @@ public class MainActivity extends Activity {
                             row.setPadding(10, 15, 10, 15);
                             row.setGravity(android.view.Gravity.CENTER_VERTICAL);
                             
-                            if (prefs.getBoolean("show_album_art", true) && !uri.isEmpty()) {
-                                final ImageView img = new ImageView(MainActivity.this);
-                                img.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
-                                img.setImageResource(R.drawable.ic_loading);
-                                img.setPadding(0, 0, 15, 0);
-                                row.addView(img);
+                            if (prefs.getBoolean("show_album_art", true)) {
+                                final RelativeLayout artContainer = new RelativeLayout(MainActivity.this);
+                                artContainer.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
+                                artContainer.setPadding(0, 0, 15, 0);
+                                row.addView(artContainer);
                                 
-                                api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
-                                    @Override public void onSuccess(String response) {
-                                        try {
-                                            JSONObject j = new JSONObject(response);
-                                            final String imgUrl = j.optString("thumbnail_url", "");
-                                            final String highResUrl = j.optString("high_res_url", "");
-                                            if (!imgUrl.isEmpty()) {
-                                                new AsyncTask<Void, Void, Bitmap>() {
-                                                    @Override protected Bitmap doInBackground(Void... voids) {
-                                                        try {
-                                                            InputStream in = new URL(imgUrl).openStream();
-                                                            return BitmapFactory.decodeStream(in);
-                                                        } catch (Exception e) { return null; }
-                                                    }
-                                                    @Override protected void onPostExecute(Bitmap b) {
-                                                        if (b != null) {
-                                                            img.setImageBitmap(b);
-                                                            if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
-                                                                new AsyncTask<Void, Void, Bitmap>() {
-                                                                    @Override protected Bitmap doInBackground(Void... voids) {
-                                                                        try { return BitmapFactory.decodeStream(new URL(highResUrl).openStream()); } catch (Exception e) { return null; }
-                                                                    }
-                                                                    @Override protected void onPostExecute(Bitmap hb) {
-                                                                        if (hb != null) img.setImageBitmap(hb);
-                                                                    }
-                                                                }.execute();
+                                final ImageView img = new ImageView(MainActivity.this);
+                                img.setLayoutParams(new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.FILL_PARENT, RelativeLayout.LayoutParams.FILL_PARENT));
+                                artContainer.addView(img);
+                                
+                                final ProgressBar pb = new ProgressBar(MainActivity.this);
+                                RelativeLayout.LayoutParams pbParams = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT);
+                                pbParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+                                pb.setLayoutParams(pbParams);
+                                pb.setVisibility(View.GONE);
+                                artContainer.addView(pb);
+                                
+                                final LinearLayout errLayout = new LinearLayout(MainActivity.this);
+                                errLayout.setOrientation(LinearLayout.VERTICAL);
+                                errLayout.setGravity(android.view.Gravity.CENTER);
+                                RelativeLayout.LayoutParams errParams = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT);
+                                errParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+                                errLayout.setLayoutParams(errParams);
+                                errLayout.setVisibility(View.GONE);
+                                
+                                final TextView errText = new TextView(MainActivity.this);
+                                errText.setTextColor(0xFFFFFFFF);
+                                errText.setTextSize(10);
+                                errText.setGravity(android.view.Gravity.CENTER);
+                                errLayout.addView(errText);
+                                
+                                final Button retryBtn = new Button(MainActivity.this);
+                                retryBtn.setText("Retry");
+                                retryBtn.setTextSize(10);
+                                retryBtn.setPadding(2, 2, 2, 2);
+                                retryBtn.setTextColor(0xFFFFFFFF);
+                                retryBtn.setBackgroundColor(0x44FFFFFF);
+                                errLayout.addView(retryBtn);
+                                
+                                artContainer.addView(errLayout);
+                                
+                                final Runnable fetchImage = new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        img.setImageBitmap(null);
+                                        errLayout.setVisibility(View.GONE);
+                                        
+                                        if (uri.isEmpty()) {
+                                            pb.setVisibility(View.GONE);
+                                            img.setImageResource(R.drawable.ic_error);
+                                            errText.setText("URL missing");
+                                            errLayout.setVisibility(View.VISIBLE);
+                                            return;
+                                        }
+                                        
+                                        pb.setVisibility(View.VISIBLE);
+                                        
+                                        api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
+                                            @Override public void onSuccess(String response) {
+                                                try {
+                                                    JSONObject j = new JSONObject(response);
+                                                    final String imgUrl = j.optString("thumbnail_url", "");
+                                                    final String highResUrl = j.optString("high_res_url", "");
+                                                    if (!imgUrl.isEmpty()) {
+                                                        new AsyncTask<Void, Void, Bitmap>() {
+                                                            @Override protected Bitmap doInBackground(Void... voids) {
+                                                                try { return BitmapFactory.decodeStream(new URL(imgUrl).openStream()); } catch (Exception e) { return null; }
                                                             }
-                                                        } else img.setImageResource(R.drawable.ic_error);
-                                                    }
-                                                }.execute();
-                                            } else img.setImageResource(R.drawable.ic_error);
-                                        } catch (Exception e) { img.setImageResource(R.drawable.ic_error); }
+                                                            @Override protected void onPostExecute(Bitmap b) {
+                                                                pb.setVisibility(View.GONE);
+                                                                if (b != null) {
+                                                                    img.setImageBitmap(b);
+                                                                    if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
+                                                                        new AsyncTask<Void, Void, Bitmap>() {
+                                                                            @Override protected Bitmap doInBackground(Void... voids) {
+                                                                                try { return BitmapFactory.decodeStream(new URL(highResUrl).openStream()); } catch (Exception e) { return null; }
+                                                                            }
+                                                                            @Override protected void onPostExecute(Bitmap hb) {
+                                                                                if (hb != null) img.setImageBitmap(hb);
+                                                                            }
+                                                                        }.execute();
+                                                                    }
+                                                                } else showError("Download failed");
+                                                            }
+                                                        }.execute();
+                                                    } else showError("Download failed");
+                                                } catch (Exception e) { showError("Download failed"); }
+                                            }
+                                            @Override public void onError(String error) { showError("Download failed"); }
+                                            
+                                            private void showError(String msg) {
+                                                pb.setVisibility(View.GONE);
+                                                img.setImageResource(R.drawable.ic_error);
+                                                errText.setText(msg);
+                                                errLayout.setVisibility(View.VISIBLE);
+                                            }
+                                        });
                                     }
-                                    @Override public void onError(String error) {}
+                                };
+                                
+                                retryBtn.setOnClickListener(new View.OnClickListener() {
+                                    @Override public void onClick(View v) { fetchImage.run(); }
                                 });
+                                
+                                fetchImage.run();
                             }
                             
                             TextView num = new TextView(MainActivity.this);
@@ -1188,105 +1386,46 @@ public class MainActivity extends Activity {
                     err.setTextColor(0xFF8892b0);
                     container.addView(err);
                 }
+                applyTheme(prefs.getString("theme", "dark"));
             }
             @Override public void onError(String error) { hideLoading(); showToast("Queue load failed", false); }
         });
     }
 
-    private void loadMovies(final String path) {
-        showLoading("Loading...");
-        String url = "/api/movies/browse";
-        if (path != null && !path.isEmpty()) {
-            url += "?path=" + java.net.URLEncoder.encode(path);
-        }
-        api.get(url, new ApiClient.Callback() {
-            @Override public void onSuccess(String response) {
-                hideLoading();
-                filesList.removeAllViews();
-                try {
-                    JSONObject json = new JSONObject(response);
-                    currentPathText.setText(json.optString("current_path", ""));
-                    JSONArray items = json.optJSONArray("items");
-                    if (items != null) {
-                        for (int i = 0; i < items.length(); i++) {
-                            final JSONObject item = items.getJSONObject(i);
-                            Button btn = new Button(MainActivity.this);
-                            final String name = item.optString("name");
-                            final String type = item.optString("type");
-                            final String filePath = item.optString("path");
-                            
-                            if (type.equals("folder")) {
-                                btn.setText("[DIR] " + name);
-                                btn.setTextColor(0xFF00d4ff);
-                                btn.setOnClickListener(new View.OnClickListener() {
-                                    @Override public void onClick(View v) { loadMovies(filePath); }
-                                });
-                            } else {
-                                btn.setText(name + " (" + item.optString("size") + ")");
-                                btn.setTextColor(0xFFFFFFFF);
-                                btn.setOnClickListener(new View.OnClickListener() {
-                                    @Override public void onClick(View v) { playMovie(filePath, name); }
-                                });
-                            }
-                            filesList.addView(btn);
-                        }
-                    }
-                } catch (Exception e) {}
-            }
-            @Override public void onError(String error) {
-                hideLoading();
-                showToast("Failed to load folder", false);
-            }
-        });
-    }
-
-    private void playMovie(String path, final String name) {
-        showLoading("Starting VLC...");
-        api.get("/api/movies/play?path=" + java.net.URLEncoder.encode(path), new ApiClient.Callback() {
-            @Override public void onSuccess(String response) {
-                hideLoading();
-                showToast("Playing " + name, true);
-                isPlayingMovie = true;
-                movieTitleText.setText(name);
-                movieBrowserView.setVisibility(View.GONE);
-                moviePlayerView.setVisibility(View.VISIBLE);
-            }
-            @Override public void onError(String error) {
-                hideLoading();
-                showToast("Failed to start VLC", false);
-            }
-        });
-    }
 
     private void setupSettings() {
-        toggleAlbumArt.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                boolean val = toggleAlbumArt.isChecked();
-                prefs.edit().putBoolean("show_album_art", val).commit();
-                sendCommand("/api/config/set?key=show_album_art&value=" + val);
-                if (!val) npArtwork.setImageBitmap(null);
-            }
-        });
-        btnTheme.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                String current = btnTheme.getText().toString();
-                String next = "Dark";
-                if (current.equals("Dark")) next = "Light";
-                else if (current.equals("Light")) next = "Native";
-                else next = "Dark";
-                
-                btnTheme.setText(next);
-                String val = next.toLowerCase();
-                prefs.edit().putString("theme", val).commit();
-                sendCommand("/api/config/set?key=theme&value=" + val);
-                applyTheme(val);
-            }
-        });
-        
-        String savedTheme = prefs.getString("theme", "dark");
-        btnTheme.setText(savedTheme.substring(0, 1).toUpperCase() + savedTheme.substring(1));
-        applyTheme(savedTheme);
+        try {
+            final android.widget.ToggleButton toggleAlbumArt = (android.widget.ToggleButton) findViewById(R.id.toggle_album_art);
+            toggleAlbumArt.setChecked(prefs.getBoolean("show_album_art", true));
+            toggleAlbumArt.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override public void onCheckedChanged(android.widget.CompoundButton buttonView, boolean isChecked) {
+                    prefs.edit().putBoolean("show_album_art", isChecked).apply();
+                    api.get("/api/config/set?key=show_album_art&value=" + isChecked, new ApiClient.Callback() {
+                        @Override public void onSuccess(String response) {}
+                        @Override public void onError(String error) {}
+                    });
+                }
+            });
+
+            final Button btnTheme = (Button) findViewById(R.id.btn_theme);
+            btnTheme.setText(prefs.getString("theme", "dark").substring(0, 1).toUpperCase() + prefs.getString("theme", "dark").substring(1));
+            btnTheme.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    String cur = prefs.getString("theme", "dark");
+                    String next = cur.equals("dark") ? "light" : (cur.equals("light") ? "native" : "dark");
+                    prefs.edit().putString("theme", next).apply();
+                    btnTheme.setText(next.substring(0, 1).toUpperCase() + next.substring(1));
+                    applyTheme(next);
+                    api.get("/api/config/set?key=theme&value=" + next, new ApiClient.Callback() {
+                        @Override public void onSuccess(String response) {}
+                        @Override public void onError(String error) {}
+                    });
+                }
+            });
+        } catch (Exception e) {}
     }
+
+
 
     private void applyTheme(String theme) {
         View root = findViewById(android.R.id.content);
@@ -1315,7 +1454,6 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(bgPrimary);
         if (screenMain != null) screenMain.setBackgroundColor(bgPrimary);
         if (tabMusic != null) tabMusic.setBackgroundColor(bgPrimary);
-        if (tabMovies != null) tabMovies.setBackgroundColor(bgPrimary);
         if (tabSettings != null) tabSettings.setBackgroundColor(bgPrimary);
         if (tabPower != null) tabPower.setBackgroundColor(bgPrimary);
         
@@ -1345,6 +1483,18 @@ public class MainActivity extends Activity {
                 if (b.getId() == R.id.btn_play_pause) {
                     defaultColor = android.graphics.Color.parseColor("#00d4ff");
                     b.setTextColor(android.graphics.Color.WHITE);
+                } else if (b.getId() == R.id.btn_disconnect) {
+                    defaultColor = android.graphics.Color.parseColor("#1a1f36");
+                    b.setTextColor(android.graphics.Color.parseColor("#ff5252"));
+                } else if (b.getId() == R.id.btn_shutdown) {
+                    defaultColor = android.graphics.Color.parseColor("#ff5252");
+                    b.setTextColor(android.graphics.Color.WHITE);
+                } else if (b.getId() == R.id.btn_restart) {
+                    defaultColor = android.graphics.Color.parseColor("#ffa726");
+                    b.setTextColor(android.graphics.Color.WHITE);
+                } else if (b.getId() == R.id.btn_close_app) {
+                    defaultColor = android.graphics.Color.parseColor("#1a1f36");
+                    b.setTextColor(android.graphics.Color.WHITE);
                 } else {
                     b.setTextColor(textP);
                 }
@@ -1354,7 +1504,19 @@ public class MainActivity extends Activity {
                 android.graphics.drawable.ColorDrawable normal = new android.graphics.drawable.ColorDrawable(defaultColor);
                 sld.addState(new int[]{android.R.attr.state_pressed}, pressed);
                 sld.addState(new int[]{}, normal);
+                int pL = 20;
+                int pT = 10;
+                int pR = 20;
+                int pB = 10;
+                
+                if (b.getId() == R.id.btn_seek_back || b.getId() == R.id.btn_seek_fwd || 
+                    b.getId() == R.id.btn_vol_down || b.getId() == R.id.btn_vol_up) {
+                    pL = 5; pR = 5;
+                }
+                
+                android.util.Log.d("MINIPC_THEME", "Set padding " + pL + " for btn id: " + b.getId());
                 b.setBackgroundDrawable(sld);
+                b.setPadding(pL, pT, pR, pB);
             }
         } else if (v instanceof EditText) {
             EditText e = (EditText) v;
@@ -1476,7 +1638,31 @@ public class MainActivity extends Activity {
     private void loadAlbumArt(final String uri) {
         if (uri.equals(lastArtUri)) return;
         lastArtUri = uri;
-        npArtwork.setImageResource(R.drawable.ic_loading);
+        
+        final ProgressBar npArtProgress = (ProgressBar) findViewById(R.id.np_art_progress);
+        final LinearLayout npArtErrorLayout = (LinearLayout) findViewById(R.id.np_art_error_layout);
+        final TextView npArtErrorText = (TextView) findViewById(R.id.np_art_error_text);
+        final Button npArtRetryBtn = (Button) findViewById(R.id.np_art_retry_btn);
+
+        npArtwork.setImageBitmap(null);
+        if (npArtProgress != null) npArtProgress.setVisibility(View.VISIBLE);
+        if (npArtErrorLayout != null) npArtErrorLayout.setVisibility(View.GONE);
+
+        if (uri.isEmpty()) {
+            if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
+            npArtwork.setImageResource(R.drawable.ic_error);
+            if (npArtErrorLayout != null) npArtErrorLayout.setVisibility(View.VISIBLE);
+            if (npArtErrorText != null) npArtErrorText.setText("URL not provided by PC");
+            if (npArtRetryBtn != null) {
+                npArtRetryBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        lastArtUri = "";
+                        loadAlbumArt(currentNpUri);
+                    }
+                });
+            }
+            return;
+        }
         
         api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
             @Override public void onSuccess(String response) {
@@ -1494,6 +1680,7 @@ public class MainActivity extends Activity {
                             }
                             @Override protected void onPostExecute(Bitmap b) {
                                 if (b != null) {
+                                    if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
                                     npArtwork.setImageBitmap(b);
                                     if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
                                         new AsyncTask<Void, Void, Bitmap>() {
@@ -1505,14 +1692,32 @@ public class MainActivity extends Activity {
                                             }
                                         }.execute();
                                     }
+                                } else {
+                                    showErrorState("Failed to download");
                                 }
-                                else npArtwork.setImageResource(R.drawable.ic_error);
                             }
                         }.execute();
-                    } else npArtwork.setImageResource(R.drawable.ic_error);
-                } catch (Exception e) { npArtwork.setImageResource(R.drawable.ic_error); }
+                    } else {
+                        showErrorState("Failed to download");
+                    }
+                } catch (Exception e) { showErrorState("Failed to download"); }
             }
-            @Override public void onError(String error) { npArtwork.setImageResource(R.drawable.ic_error); }
+            @Override public void onError(String error) { showErrorState("Failed to download"); }
+            
+            private void showErrorState(String errorMsg) {
+                if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
+                npArtwork.setImageResource(R.drawable.ic_error);
+                if (npArtErrorLayout != null) npArtErrorLayout.setVisibility(View.VISIBLE);
+                if (npArtErrorText != null) npArtErrorText.setText(errorMsg);
+                if (npArtRetryBtn != null) {
+                    npArtRetryBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) {
+                            lastArtUri = "";
+                            loadAlbumArt(currentNpUri);
+                        }
+                    });
+                }
+            }
         });
     }
 
@@ -1542,13 +1747,6 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() {
         if (screenMain.getVisibility() == View.VISIBLE) {
-            if (isPlayingMovie) {
-                sendCommand("/api/movies/control?action=stop"); 
-                isPlayingMovie = false;
-                moviePlayerView.setVisibility(View.GONE);
-                movieBrowserView.setVisibility(View.VISIBLE);
-                return;
-            }
         } else {
             showToast("Device is locked", false);
         }

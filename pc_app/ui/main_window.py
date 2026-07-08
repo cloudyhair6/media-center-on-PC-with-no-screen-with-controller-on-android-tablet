@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QLabel, QApplication,
+    QMainWindow, QWidget, QVBoxLayout, QLabel, QApplication, QHBoxLayout, QProgressBar
 )
 from styles.theme import Colors, Sizes
 from backend.remote_server import RemoteServer, RemoteCommandDispatcher, get_local_ip
@@ -80,15 +80,39 @@ class MainWindow(QMainWindow):
         layout.addStretch(4)
         
         # Volume OSD (overlay)
-        self._volume_osd = QLabel('', central)
-        self._volume_osd.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._volume_osd = QWidget(central)
+        self._volume_osd.setFixedSize(320, 80)
         self._volume_osd.setStyleSheet(
-            f'background: rgba(0,0,0,0.75); color: {Colors.TEXT_PRIMARY}; '
-            f'font-size: {Sizes.FONT_H1}px; font-weight: bold; '
-            f'border-radius: {Sizes.CARD_RADIUS}px; '
-            f'padding: {Sizes.SPACING}px {Sizes.SPACING_XL}px;'
+            f'QWidget {{ background: rgba(0,0,0,0.75); border-radius: {Sizes.CARD_RADIUS}px; }}'
         )
-        self._volume_osd.setFixedSize(280, 80)
+        osd_layout = QHBoxLayout(self._volume_osd)
+        osd_layout.setContentsMargins(20, 10, 20, 10)
+        osd_layout.setSpacing(15)
+        
+        self._volume_label = QLabel('VOL')
+        self._volume_label.setStyleSheet(
+            f'color: {Colors.TEXT_PRIMARY}; font-size: {Sizes.FONT_H1}px; font-weight: bold; background: transparent;'
+        )
+        osd_layout.addWidget(self._volume_label)
+        
+        self._volume_bar = QProgressBar()
+        self._volume_bar.setRange(0, 100)
+        self._volume_bar.setTextVisible(False)
+        self._volume_bar.setFixedHeight(20)
+        self._volume_bar.setStyleSheet(
+            f'''
+            QProgressBar {{
+                background-color: rgba(255, 255, 255, 0.2);
+                border-radius: 10px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {Colors.SUCCESS};
+                border-radius: 10px;
+            }}
+            '''
+        )
+        osd_layout.addWidget(self._volume_bar)
+        
         self._volume_osd.setVisible(False)
         
         self._osd_timer = QTimer(self)
@@ -135,10 +159,10 @@ class MainWindow(QMainWindow):
             f'background: transparent;'
         )
         self._volume_osd.setStyleSheet(
-            f'background: rgba(0,0,0,0.75); color: {colors.TEXT_PRIMARY}; '
-            f'font-size: {Sizes.FONT_H1}px; font-weight: bold; '
-            f'border-radius: {Sizes.CARD_RADIUS}px; '
-            f'padding: {Sizes.SPACING}px {Sizes.SPACING_XL}px;'
+            f'QWidget {{ background: rgba(0,0,0,0.75); border-radius: {Sizes.CARD_RADIUS}px; }}'
+        )
+        self._volume_label.setStyleSheet(
+            f'color: {colors.TEXT_PRIMARY}; font-size: {Sizes.FONT_H1}px; font-weight: bold; background: transparent;'
         )
         self._update_clock()
     
@@ -149,10 +173,8 @@ class MainWindow(QMainWindow):
         self._date.setText(now.strftime('%A, %B %d, %Y'))
     
     def _show_volume_osd(self, vol):
-        bar_filled = int(vol / 10)
-        bar_empty = 10 - bar_filled
-        bar = '|' * bar_filled + '.' * bar_empty
-        self._volume_osd.setText(f'VOL {vol}%  [{bar}]')
+        self._volume_label.setText(f'{vol}%')
+        self._volume_bar.setValue(vol)
         cw = self.centralWidget()
         if cw:
             x = (cw.width() - self._volume_osd.width()) // 2

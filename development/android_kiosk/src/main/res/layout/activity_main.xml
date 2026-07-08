@@ -131,12 +131,23 @@
                         android:orientation="vertical" android:gravity="center" android:padding="20dp">
                         <RelativeLayout android:layout_width="200dp" android:layout_height="200dp" android:layout_marginBottom="20dp">
                             <ImageView android:id="@+id/np_artwork"
-                                android:layout_width="fill_parent" android:layout_height="fill_parent"
-                                android:background="#111827" />
-                            <TextView android:id="@+id/np_art_error"
+                                android:layout_width="fill_parent" android:layout_height="fill_parent" />
+                            <ProgressBar android:id="@+id/np_art_progress"
                                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:layout_centerInParent="true" android:text="Error Loading Art"
-                                android:textColor="#ff4444" android:textSize="14sp" android:visibility="gone" />
+                                android:layout_centerInParent="true" android:visibility="gone" />
+                            <LinearLayout android:id="@+id/np_art_error_layout"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:layout_centerInParent="true" android:orientation="vertical"
+                                android:gravity="center" android:visibility="gone">
+                                <TextView android:id="@+id/np_art_error_text"
+                                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:text="Failed to download" android:textColor="#ffffff" android:textSize="12sp"
+                                    android:gravity="center" android:layout_marginBottom="10dp" />
+                                <Button android:id="@+id/np_art_retry_btn"
+                                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:text="Retry" android:textSize="12sp" android:padding="5dp"
+                                    android:textColor="#ffffff" android:background="#44ffffff" />
+                            </LinearLayout>
                         </RelativeLayout>
                         <TextView android:id="@+id/np_title"
                             android:layout_width="fill_parent" android:layout_height="wrap_content"
@@ -242,54 +253,7 @@
                 </ScrollView>
             </LinearLayout>
             
-            <!-- ====== MOVIES TAB ====== -->
-            <LinearLayout android:id="@+id/tab_movies"
-                android:layout_width="fill_parent" android:layout_height="fill_parent"
-                android:orientation="vertical" android:visibility="gone" android:padding="10dp">
-                
-                <!-- Browser View -->
-                <LinearLayout android:id="@+id/movie_browser_view" android:layout_width="fill_parent" android:layout_height="fill_parent" android:orientation="vertical">
-                    <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-                        <Button android:id="@+id/btn_go_up" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="Go Up" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="10dp" />
-                        <TextView android:id="@+id/current_path" android:layout_width="fill_parent" android:layout_height="wrap_content"
-                            android:text="C:\\" android:textColor="#8892b0" android:singleLine="true" android:ellipsize="start" />
-                    </LinearLayout>
-                    <ScrollView android:layout_width="fill_parent" android:layout_height="fill_parent" android:layout_marginTop="10dp">
-                        <LinearLayout android:id="@+id/files_list" android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="vertical" />
-                    </ScrollView>
-                </LinearLayout>
-                
-                <!-- Player View (shown when movie is playing) -->
-                <LinearLayout android:id="@+id/movie_player_view" android:layout_width="fill_parent" android:layout_height="fill_parent"
-                    android:orientation="vertical" android:gravity="center" android:visibility="gone" android:padding="20dp">
-                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="Now Playing on PC" android:textColor="#00d4ff" android:textSize="20sp" android:layout_marginBottom="10dp"/>
-                    <TextView android:id="@+id/movie_title" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="Filename.mp4" android:textColor="#ffffff" android:textSize="24sp" android:textStyle="bold" android:layout_marginBottom="20dp"/>
-                    
-                    <TextView android:id="@+id/movie_time" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="00:00 / 00:00" android:textColor="#8892b0" android:textSize="18sp" android:layout_marginBottom="20dp"/>
-                    
-                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="20dp">
-                        <Button android:id="@+id/btn_movie_seek_back" android:layout_width="80dp" android:layout_height="60dp" android:text="-10s" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="10dp"/>
-                        <Button android:id="@+id/btn_movie_play_pause" android:layout_width="100dp" android:layout_height="60dp" android:text="Play/Pause" android:textColor="#ffffff" android:background="#00d4ff" android:layout_marginRight="10dp"/>
-                        <Button android:id="@+id/btn_movie_seek_fwd" android:layout_width="80dp" android:layout_height="60dp" android:text="+10s" android:textColor="#ffffff" android:background="#1a1f36" />
-                    </LinearLayout>
-                    
-                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="30dp">
-                        <Button android:id="@+id/btn_movie_vol_down" android:layout_width="80dp" android:layout_height="50dp" android:text="Vol -" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="10dp"/>
-                        <Button android:id="@+id/btn_movie_vol_up" android:layout_width="80dp" android:layout_height="50dp" android:text="Vol +" android:textColor="#ffffff" android:background="#1a1f36" />
-                    </LinearLayout>
-                    
-                    <Button android:id="@+id/btn_movie_stop" android:layout_width="200dp" android:layout_height="60dp"
-                        android:text="Stop &amp; Exit Movie" android:textColor="#ffffff" android:background="#ff5252" />
-                        
-                    <TextView android:id="@+id/movie_info" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="" android:textColor="#8892b0" android:layout_marginTop="20dp"/>
-                </LinearLayout>
-            </LinearLayout>
-            
+
             <!-- ====== SETTINGS TAB ====== -->
             <ScrollView android:id="@+id/tab_settings"
                 android:layout_width="fill_parent" android:layout_height="fill_parent"
@@ -372,8 +336,7 @@
             android:background="#111827">
             <Button android:id="@+id/tab_btn_music" android:layout_width="0dp" android:layout_height="fill_parent" android:layout_weight="1"
                 android:text="MUSIC" android:textColor="#00d4ff" android:background="#1a1f36" />
-            <Button android:id="@+id/tab_btn_movies" android:layout_width="0dp" android:layout_height="fill_parent" android:layout_weight="1"
-                android:text="MOVIES" android:textColor="#8892b0" android:background="#111827" />
+
             <Button android:id="@+id/tab_btn_settings" android:layout_width="0dp" android:layout_height="fill_parent" android:layout_weight="1"
                 android:text="SETTINGS" android:textColor="#8892b0" android:background="#111827" />
             <Button android:id="@+id/tab_btn_power" android:layout_width="0dp" android:layout_height="fill_parent" android:layout_weight="1"
