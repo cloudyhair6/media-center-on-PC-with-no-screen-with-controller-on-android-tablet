@@ -245,11 +245,13 @@ class SpotifyControl:
                         current_title = t
                         break
 
-            # If title is unchanged, don't execute CLI subprocess (avoids main thread lag)
             if not force_fetch and current_title == SpotifyControl._last_title and current_title != "":
                 prog = SpotifyControl.get_playback_progress()
                 SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
                 SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
+                state = SpotifyControl.get_shuffle_repeat()
+                SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
+                SpotifyControl._last_metadata["repeat"] = state["repeat"]
                 return SpotifyControl._last_metadata
 
             output = SpotifyControl._run_cli(["now-playing", "--format", "json"])
@@ -272,6 +274,9 @@ class SpotifyControl:
                 prog = SpotifyControl.get_playback_progress()
                 SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
                 SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
+                state = SpotifyControl.get_shuffle_repeat()
+                SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
+                SpotifyControl._last_metadata["repeat"] = state["repeat"]
                 return SpotifyControl._last_metadata
 
             try:
@@ -327,6 +332,10 @@ class SpotifyControl:
                 prog = SpotifyControl.get_playback_progress()
                 SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
                 SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
+                
+                state = SpotifyControl.get_shuffle_repeat()
+                SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
+                SpotifyControl._last_metadata["repeat"] = state["repeat"]
 
                 return SpotifyControl._last_metadata
 
@@ -371,6 +380,29 @@ class SpotifyControl:
         """Enable or disable shuffle."""
         output = SpotifyControl._run_cli(["shuffle", "on" if state else "off"])
         return "Failed" not in output and "client error" not in output.lower()
+
+    @staticmethod
+    def get_shuffle_repeat() -> dict:
+        """Get shuffle and repeat states using Windows SMTC."""
+        try:
+            import asyncio
+            from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+            import winrt.windows.media
+
+            async def _get_state():
+                manager = await GlobalSystemMediaTransportControlsSessionManager.request_async()
+                session = manager.get_current_session()
+                if session:
+                    info = session.get_playback_info()
+                    return {
+                        "shuffle": info.is_shuffle_active,
+                        "repeat": int(info.auto_repeat_mode)
+                    }
+                return {"shuffle": False, "repeat": 0}
+
+            return asyncio.run(_get_state())
+        except Exception as e:
+            return {"shuffle": False, "repeat": 0}
 
     @staticmethod
     def repeat(state: str) -> bool:

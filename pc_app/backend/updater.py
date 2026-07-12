@@ -41,7 +41,7 @@ def get_local_version() -> str:
 def get_remote_version() -> str | None:
     """Fetch the latest version string from GitHub."""
     try:
-        req = Request(_VERSION_URL, headers={"User-Agent": "MiniPC-Updater/1.0"})
+        req = Request(_VERSION_URL, headers={"User-Agent": "Media Centre-Updater/1.0"})
         with urlopen(req, timeout=10) as resp:
             return resp.read().decode("utf-8").strip()
     except (URLError, OSError, ValueError):
@@ -107,7 +107,7 @@ class UpdateWorker(QThread):
         """Download and apply the update."""
         index_url = _INDEX_URL_TEMPLATE.format(version=version)
         try:
-            req = Request(index_url, headers={"User-Agent": "MiniPC-Updater/1.0"})
+            req = Request(index_url, headers={"User-Agent": "Media Centre-Updater/1.0"})
             with urlopen(req, timeout=15) as resp:
                 index = json.loads(resp.read().decode("utf-8"))
         except (URLError, OSError, json.JSONDecodeError) as e:
@@ -133,7 +133,7 @@ class UpdateWorker(QThread):
             target_path = PROJECT_ROOT / rel_path
 
             try:
-                req = Request(file_url, headers={"User-Agent": "MiniPC-Updater/1.0"})
+                req = Request(file_url, headers={"User-Agent": "Media Centre-Updater/1.0"})
                 with urlopen(req, timeout=30) as resp:
                     data = resp.read()
 

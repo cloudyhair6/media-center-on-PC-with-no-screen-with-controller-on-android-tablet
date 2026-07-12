@@ -1,6 +1,6 @@
 @echo off
 echo ===================================================
-echo Setting up MiniPC Media Center Environment
+echo Setting up Media Center Environment
 echo ===================================================
 cd pc_app
 echo [1/4] Clearing Cache...

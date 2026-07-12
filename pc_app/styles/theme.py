@@ -1,4 +1,4 @@
-"""MiniPC Dark Theme - Premium streaming UI aesthetic."""
+"""Media Centre Dark Theme - Premium streaming UI aesthetic."""
 
 import json
 from pathlib import Path

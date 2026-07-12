@@ -1,4 +1,4 @@
-"""MiniPC v2.0 — Passive display showing time and IP."""
+"""Media Centre v2.0 — Passive display showing time and IP."""
 from __future__ import annotations
 import json
 from pathlib import Path
@@ -16,7 +16,7 @@ from styles.theme import get_active_colors
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('MiniPC')
+        self.setWindowTitle('Media Centre')
         self.setObjectName('MainWindow')
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
@@ -189,14 +189,14 @@ class MainWindow(QMainWindow):
         self._remote_server = RemoteServer(self._remote_dispatcher, port=8080)
         try:
             url = self._remote_server.start()
-            print(f'[MiniPC] Remote: {url}')
+            print(f'[Media Centre] Remote: {url}')
             try:
                 from backend.startup_announcer import play_ready_sequence
                 play_ready_sequence(get_local_ip())
             except Exception as e:
-                print(f"[MiniPC] Failed to play ready sequence: {e}")
+                print(f"[Media Centre] Failed to play ready sequence: {e}")
         except Exception as e:
-            print(f'[MiniPC] Remote server failed: {e}')
+            print(f'[Media Centre] Remote server failed: {e}')
     
     def _auto_launch_spotify(self):
         try:
@@ -207,9 +207,9 @@ class MainWindow(QMainWindow):
                     from backend.spotify_control import SpotifyControl
                     if not SpotifyControl.is_running():
                         SpotifyControl.launch()
-                        print('[MiniPC] Spotify auto-launched')
+                        print('[Media Centre] Spotify auto-launched')
         except Exception as e:
-            print(f'[MiniPC] Spotify auto-launch failed: {e}')
+            print(f'[Media Centre] Spotify auto-launch failed: {e}')
     
     def _handle_remote_command(self, command):
         if command == 'volume_up':

@@ -1,1 +1,1 @@
-# MiniPC backend package
+# Media Centre backend package

@@ -1,4 +1,4 @@
-"""Persistent JSON configuration for MiniPC."""
+"""Persistent JSON configuration for Media Centre."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import sys
 import os
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".minipc"
+CONFIG_DIR = Path.home() / ".Media Centre"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 _DEFAULT = {
@@ -79,7 +79,7 @@ class Config:
 
     @staticmethod
     def set_startup_on_boot(enabled: bool) -> tuple[bool, str]:
-        """Add or remove MiniPC from Windows startup."""
+        """Add or remove Media Centre from Windows startup."""
         try:
             import winreg
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -87,7 +87,7 @@ class Config:
                 winreg.HKEY_CURRENT_USER, key_path, 0,
                 winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE,
             )
-            app_name = "MiniPC"
+            app_name = "Media Centre"
             if enabled:
                 script = Path(__file__).resolve().parent.parent / "main.py"
                 cmd = f'"{sys.executable}" "{script}"'
@@ -106,7 +106,7 @@ class Config:
 
     @staticmethod
     def is_startup_on_boot() -> bool:
-        """Check if MiniPC is in Windows startup."""
+        """Check if Media Centre is in Windows startup."""
         try:
             import winreg
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -115,7 +115,7 @@ class Config:
                 winreg.KEY_QUERY_VALUE,
             )
             try:
-                winreg.QueryValueEx(key, "MiniPC")
+                winreg.QueryValueEx(key, "Media Centre")
                 winreg.CloseKey(key)
                 return True
             except FileNotFoundError:

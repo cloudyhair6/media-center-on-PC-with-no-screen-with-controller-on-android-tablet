@@ -15,7 +15,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="MiniPC"
+            android:text="Media Centre"
             android:textSize="40sp"
             android:textColor="#ffffff"
             android:textStyle="bold"
@@ -37,15 +37,26 @@
             <!-- Buttons dynamically added here -->
         </LinearLayout>
         
-        <Button android:id="@+id/btn_add_pc"
-            android:layout_width="fill_parent"
-            android:layout_height="wrap_content"
-            android:text="+ Add New PC"
-            android:textColor="#00d4ff"
-            android:background="#1a1f36"
-            android:padding="15dp"
-            android:layout_marginTop="20dp"
-            android:maxWidth="400dp" />
+        <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:maxWidth="400dp" android:layout_marginTop="20dp" android:weightSum="2">
+            <Button android:id="@+id/btn_add_pc"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="+ Add New PC"
+                android:textColor="#00d4ff"
+                android:background="#1a1f36"
+                android:padding="15dp"
+                android:layout_marginRight="5dp" />
+            <Button android:id="@+id/btn_remove_pc"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="- Remove PC"
+                android:textColor="#ff3333"
+                android:background="#1a1f36"
+                android:padding="15dp"
+                android:layout_marginLeft="5dp" />
+        </LinearLayout>
             
 
     </LinearLayout>
@@ -213,9 +224,9 @@
                         <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:orientation="horizontal">
                             <Button android:id="@+id/btn_shuffle" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:text="Shuffle: OFF" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="10dp"/>
+                                android:text="Shuffle" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="10dp"/>
                             <Button android:id="@+id/btn_repeat" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:text="Repeat: OFF" android:textColor="#ffffff" android:background="#1a1f36" />
+                                android:text="Repeat" android:textColor="#ffffff" android:background="#1a1f36" />
                         </LinearLayout>
                     </LinearLayout>
                 </ScrollView>

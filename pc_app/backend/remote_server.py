@@ -1,4 +1,4 @@
-"""HTTP remote control server for MiniPC.
+"""HTTP remote control server for Media Centre.
 
 Runs a lightweight HTTP server that serves a mobile-friendly remote control
 web page and accepts navigation commands via a simple REST API.
@@ -14,7 +14,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 # Setup global logging
-log_path = Path(__file__).resolve().parent.parent / "minipc.log"
+log_path = Path(__file__).resolve().parent.parent / "Media Centre.log"
 logging.basicConfig(
     filename=str(log_path),
     level=logging.INFO,
@@ -53,6 +53,12 @@ class _RemoteHandler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self) -> None:
+        """
+        Main HTTP GET request handler.
+        Routes API calls starting with /api/ to their respective backend controllers
+        (e.g., Spotify, System Stats, Configuration) and serves static HTML/JS/CSS 
+        files for the remote control interface otherwise.
+        """
         raw_path = self.path.rstrip("/")
         path = raw_path.split("?")[0]
         
@@ -82,7 +88,7 @@ class _RemoteHandler(BaseHTTPRequestHandler):
 
         # API: status
         if path == "/api/status":
-            self._json_response(200, {"ok": True, "app": "MiniPC"})
+            self._json_response(200, {"ok": True, "app": "Media Centre"})
             return
 
         # API: Spotify now playing
@@ -326,17 +332,7 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                     res = SystemControl.get_system_stats()
                     res['disk'] = SystemControl.get_disk_usage()
                     self._json_response(200, res)
-                elif action == "files":
-                    res = SystemControl.get_local_videos()
-                    self._json_response(200, {"items": res})
-                elif action == "play_file":
-                    from urllib.parse import urlparse, parse_qs
-                    file_path = parse_qs(urlparse(self.path).query).get("path", [""])[0]
-                    if file_path:
-                        SystemControl.play_local_video(file_path)
-                        self._json_response(200, {"ok": True})
-                    else:
-                        self._json_response(400, {"error": "Missing path"})
+
                 elif action == "scaling":
                     SystemControl.set_display_scaling_100()
                     self._json_response(200, {"ok": True})
@@ -386,99 +382,7 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 self._json_response(500, {"error": str(e)})
             return
 
-        # API: Browse movies
-        if path == '/api/movies/browse':
-            try:
-                from urllib.parse import urlparse, parse_qs
-                import json as json_mod
-                browse_path = parse_qs(urlparse(self.path).query).get('path', [''])[0]
-                if not browse_path:
-                    # Load default from config
-                    config_path = Path(__file__).resolve().parent.parent / 'config.json'
-                    if config_path.exists():
-                        cfg = json_mod.loads(config_path.read_text())
-                        browse_path = cfg.get('default_movie_path', 'C:\\Users\\Will\\Videos')
-                    else:
-                        browse_path = 'C:\\Users\\Will\\Videos'
-                p = Path(browse_path)
-                items = []
-                if p.exists() and p.is_dir():
-                    for child in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-                        try:
-                            if child.is_dir():
-                                items.append({'name': child.name, 'path': str(child), 'type': 'folder'})
-                            elif child.suffix.lower() in ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v', '.webm', '.ts'):
-                                stat = child.stat()
-                                size_mb = stat.st_size / (1024*1024)
-                                items.append({
-                                    'name': child.name,
-                                    'path': str(child),
-                                    'type': 'file',
-                                    'size': f'{size_mb:.0f} MB',
-                                    'ext': child.suffix.upper().lstrip('.')
-                                })
-                        except (PermissionError, OSError):
-                            continue
-                self._json_response(200, {'items': items, 'current_path': str(p), 'parent': str(p.parent) if p.parent != p else ''})
-            except Exception as e:
-                self._json_response(500, {'error': str(e)})
-            return
 
-        # API: Play movie in VLC
-        if path == '/api/movies/play':
-            try:
-                from urllib.parse import urlparse, parse_qs
-                file_path = parse_qs(urlparse(self.path).query).get('path', [''])[0]
-                if file_path:
-                    from backend.system_control import SystemControl
-                    result = SystemControl.launch_vlc(file_path)
-                    import time
-                    time.sleep(1)  # Wait for VLC to start
-                    self._json_response(200, {'ok': result})
-                else:
-                    self._json_response(400, {'error': 'Missing path'})
-            except Exception as e:
-                self._json_response(500, {'error': str(e)})
-            return
-
-        # API: Control VLC playback
-        if path == '/api/movies/control':
-            try:
-                from urllib.parse import urlparse, parse_qs
-                from backend.system_control import SystemControl
-                action = parse_qs(urlparse(self.path).query).get('action', [''])[0]
-                if action == 'play_pause':
-                    SystemControl.vlc_command('pl_pause')
-                elif action == 'seek_fwd':
-                    SystemControl.vlc_command('seek', '+10')
-                elif action == 'seek_back':
-                    SystemControl.vlc_command('seek', '-10')
-                elif action == 'stop':
-                    SystemControl.vlc_stop()
-                elif action == 'volume_up':
-                    status = SystemControl.vlc_get_status()
-                    new_vol = min(512, status.get('volume', 256) + 26)
-                    SystemControl.vlc_command('volume', str(new_vol))
-                elif action == 'volume_down':
-                    status = SystemControl.vlc_get_status()
-                    new_vol = max(0, status.get('volume', 256) - 26)
-                    SystemControl.vlc_command('volume', str(new_vol))
-                import time
-                time.sleep(0.1)
-                self._json_response(200, {'ok': True})
-            except Exception as e:
-                self._json_response(500, {'error': str(e)})
-            return
-
-        # API: Get VLC status
-        if path == '/api/movies/info':
-            try:
-                from backend.system_control import SystemControl
-                status = SystemControl.vlc_get_status()
-                self._json_response(200, status)
-            except Exception as e:
-                self._json_response(500, {'error': str(e)})
-            return
 
         # API: Get config
         if path == '/api/config':
@@ -628,7 +532,7 @@ class RemoteServer:
         self._thread.start()
         ip = get_local_ip()
         url = f"http://{ip}:{self.port}"
-        print(f"[MiniPC] Remote control available at: {url}")
+        print(f"[Media Centre] Remote control available at: {url}")
         return url
 
     def stop(self) -> None:

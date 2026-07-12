@@ -1,1 +1,1 @@
-# MiniPC styles package
+# Media Centre styles package

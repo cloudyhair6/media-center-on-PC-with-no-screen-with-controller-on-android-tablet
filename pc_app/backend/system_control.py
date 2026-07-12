@@ -451,31 +451,7 @@ class SystemControl:
             print(f"Stats Error: {e}")
             return {"cpu": 0, "ram": 0}
 
-    @staticmethod
-    def get_local_videos() -> list:
-        """Find local videos in the Videos folder."""
-        try:
-            from pathlib import Path
-            import os
-            videos = []
-            home = Path.home()
-            for v_dir in [home / "Videos", home / "Downloads"]:
-                if v_dir.exists():
-                    for f in v_dir.rglob("*"):
-                        if f.is_file() and f.suffix.lower() in [".mp4", ".mkv", ".avi", ".mov"]:
-                            videos.append({
-                                "name": f.stem,
-                                "path": str(f)
-                            })
-            return videos
-        except Exception:
-            return []
 
-    @staticmethod
-    def play_local_video(path: str) -> None:
-        """Launch video in default player."""
-        import os
-        os.startfile(path)
 
     @staticmethod
     def set_display_scaling_100() -> None:
@@ -488,96 +464,12 @@ class SystemControl:
         )
         subprocess.run(["powershell", "-WindowStyle", "Hidden", "-Command", script], creationflags=0x08000000)
 
-    # ------------------------------------------------------------------
-    # Disk & VLC
-    # ------------------------------------------------------------------
-
     @staticmethod
     def get_disk_usage() -> int:
         """Get disk usage percentage of the system drive."""
         import shutil
         total, used, free = shutil.disk_usage('C:\\')
         return int((used / total) * 100)
-
-    @staticmethod
-    def launch_vlc(file_path: str) -> bool:
-        """Launch VLC in fullscreen with HTTP interface enabled."""
-        import os
-        vlc_paths = [
-            r'C:\Program Files\VideoLAN\VLC\vlc.exe',
-            r'C:\Program Files (x86)\VideoLAN\VLC\vlc.exe',
-        ]
-        vlc = None
-        for p in vlc_paths:
-            if os.path.exists(p):
-                vlc = p
-                break
-        if not vlc:
-            return False
-        # Launch VLC with HTTP interface on port 9090, password 'minipc'
-        subprocess.Popen([
-            vlc, file_path,
-            '--fullscreen',
-            '--extraintf', 'http',
-            '--http-host', '127.0.0.1',
-            '--http-port', '9090',
-            '--http-password', 'minipc',
-        ], creationflags=0x08000000)
-        return True
-
-    @staticmethod
-    def vlc_command(command: str, val: str = '') -> dict:
-        """Send command to VLC HTTP interface."""
-        import urllib.request
-        import base64
-        try:
-            url = f'http://127.0.0.1:9090/requests/status.json?command={command}'
-            if val:
-                url += f'&val={val}'
-            auth = base64.b64encode(b':minipc').decode()
-            req = urllib.request.Request(url, headers={'Authorization': f'Basic {auth}'})
-            with urllib.request.urlopen(req, timeout=2) as resp:
-                import json
-                return json.loads(resp.read().decode('utf-8'))
-        except Exception as e:
-            return {'error': str(e)}
-
-    @staticmethod
-    def vlc_get_status() -> dict:
-        """Get VLC current playback status."""
-        import urllib.request
-        import base64
-        try:
-            url = 'http://127.0.0.1:9090/requests/status.json'
-            auth = base64.b64encode(b':minipc').decode()
-            req = urllib.request.Request(url, headers={'Authorization': f'Basic {auth}'})
-            with urllib.request.urlopen(req, timeout=2) as resp:
-                import json
-                data = json.loads(resp.read().decode('utf-8'))
-                # Extract useful info
-                info = data.get('information', {}).get('category', {}).get('meta', {})
-                stream0 = data.get('information', {}).get('category', {}).get('Stream 0', {})
-                return {
-                    'state': data.get('state', 'stopped'),
-                    'time': data.get('time', 0),
-                    'length': data.get('length', 0),
-                    'position': data.get('position', 0),
-                    'volume': data.get('volume', 256),
-                    'filename': info.get('filename', ''),
-                    'resolution': stream0.get('Resolution', ''),
-                    'codec': stream0.get('Codec', ''),
-                }
-        except Exception:
-            return {'state': 'stopped', 'time': 0, 'length': 0}
-
-    @staticmethod
-    def vlc_stop() -> bool:
-        """Stop VLC and close it."""
-        try:
-            subprocess.run(['taskkill', '/F', '/IM', 'vlc.exe'], capture_output=True, creationflags=0x08000000)
-            return True
-        except Exception:
-            return False
 
     @staticmethod
     def get_audio_info() -> dict:

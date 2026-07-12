@@ -1,4 +1,4 @@
-"""MiniPC v2.0 — Passive media center server."""
+"""Media Centre v2.0 — Passive media center server."""
 import sys
 import os
 import subprocess
@@ -28,14 +28,14 @@ def _ensure_dependencies():
             missing.append(pip_name)
     if not missing:
         return
-    print(f'[MiniPC] Installing: {", ".join(missing)}')
+    print(f'[Media Centre] Installing: {", ".join(missing)}')
     try:
         subprocess.check_call(
             [sys.executable, '-m', 'pip', 'install', '--quiet', *missing],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
     except subprocess.CalledProcessError as e:
-        print(f'[MiniPC] Install failed: {e}')
+        print(f'[Media Centre] Install failed: {e}')
         sys.exit(1)
     importlib.invalidate_caches()
 
@@ -49,7 +49,7 @@ from ui.main_window import MainWindow
 def main():
     os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '1'
     app = QApplication(sys.argv)
-    app.setApplicationName('MiniPC')
+    app.setApplicationName('Media Centre')
     
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor(Colors.BG_PRIMARY))
