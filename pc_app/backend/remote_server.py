@@ -88,7 +88,17 @@ class _RemoteHandler(BaseHTTPRequestHandler):
 
         # API: status
         if path == "/api/status":
-            self._json_response(200, {"ok": True, "app": "Media Centre"})
+            version = "v1.8"
+            try:
+                import json
+                # updater_config.json is in the root directory (one above pc_app)
+                config_path = Path(__file__).resolve().parent.parent.parent / "updater_config.json"
+                if config_path.exists():
+                    cfg = json.loads(config_path.read_text(encoding="utf-8"))
+                    version = cfg.get("current_version", version)
+            except Exception:
+                pass
+            self._json_response(200, {"ok": True, "app": "Media Centre", "version": version})
             return
 
         # API: Spotify now playing

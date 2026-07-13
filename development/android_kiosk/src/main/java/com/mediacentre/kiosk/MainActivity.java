@@ -629,7 +629,21 @@ public class MainActivity extends Activity {
             @Override
             public void onSuccess(String response) {
                 hideLoading();
-                showToast("Connected", true);
+                try {
+                    org.json.JSONObject json = new org.json.JSONObject(response);
+                    String serverVersion = json.optString("version", "v1.8");
+                    if (!"v1.8".equals(serverVersion)) {
+                        new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("Update Available")
+                            .setMessage("Please update to version " + serverVersion)
+                            .setPositiveButton("Do it later", null)
+                            .show();
+                    } else {
+                        showToast("Up-to-date", true);
+                    }
+                } catch (Exception e) {
+                    showToast("Connected", true);
+                }
                 screenConnection.setVisibility(View.GONE);
                 screenMain.setVisibility(View.VISIBLE);
                 switchTab(0);
@@ -1707,21 +1721,36 @@ public class MainActivity extends Activity {
         ((Button) findViewById(R.id.btn_shutdown)).setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 new AlertDialog.Builder(MainActivity.this).setTitle("Confirm").setMessage("Shutdown PC?").setPositiveButton("Yes", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) { sendCommand("/api/system/shutdown"); }
+                    public void onClick(DialogInterface d, int w) { 
+                        sendCommand("/api/system/shutdown"); 
+                        screenMain.setVisibility(View.GONE);
+                        screenConnection.setVisibility(View.VISIBLE);
+                        api = null;
+                    }
                 }).setNegativeButton("No", null).show();
             }
         });
         ((Button) findViewById(R.id.btn_restart)).setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 new AlertDialog.Builder(MainActivity.this).setTitle("Confirm").setMessage("Restart PC?").setPositiveButton("Yes", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) { sendCommand("/api/system/restart"); }
+                    public void onClick(DialogInterface d, int w) { 
+                        sendCommand("/api/system/restart"); 
+                        screenMain.setVisibility(View.GONE);
+                        screenConnection.setVisibility(View.VISIBLE);
+                        api = null;
+                    }
                 }).setNegativeButton("No", null).show();
             }
         });
         ((Button) findViewById(R.id.btn_close_app)).setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 new AlertDialog.Builder(MainActivity.this).setTitle("Confirm").setMessage("Close PC App?").setPositiveButton("Yes", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) { sendCommand("/api/system/close_app"); }
+                    public void onClick(DialogInterface d, int w) { 
+                        sendCommand("/api/system/close_app"); 
+                        screenMain.setVisibility(View.GONE);
+                        screenConnection.setVisibility(View.VISIBLE);
+                        api = null;
+                    }
                 }).setNegativeButton("No", null).show();
             }
         });
