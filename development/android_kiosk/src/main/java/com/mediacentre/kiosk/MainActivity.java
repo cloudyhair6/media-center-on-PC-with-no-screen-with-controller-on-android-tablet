@@ -2002,15 +2002,15 @@ public class MainActivity extends Activity {
             public void onSuccess(String response) {
                 try {
                     JSONObject json = new JSONObject(response);
-                    String synced = json.optJSONObject("data").optString("lyrics", "");
-                    if (synced.isEmpty()) {
+                    if (json.has("status") && json.optString("status").equals("error")) {
+                        final String errMsg = json.has("error") ? json.optJSONObject("error").optString("message", "Error") : json.optString("message", "Error");
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
                                 if (lyricsContent != null) {
                                     lyricsContent.removeAllViews();
                                     TextView error = new TextView(MainActivity.this);
-                                    error.setText("No synced lyrics found.");
+                                    error.setText(errMsg);
                                     error.setTextColor(0xFF8892b0);
                                     error.setTextSize(18);
                                     lyricsContent.addView(error);
@@ -2019,7 +2019,30 @@ public class MainActivity extends Activity {
                         });
                         return;
                     }
-                    parseLrc(synced);
+                    
+                    JSONObject data = json.optJSONObject("data");
+                    if (data == null) {
+                        return;
+                    }
+                    String synced = data.optString("lyrics", "");
+                    boolean hasTimestamps = data.optBoolean("hasTimestamps", true);
+                    if (synced.isEmpty()) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (lyricsContent != null) {
+                                    lyricsContent.removeAllViews();
+                                    TextView error = new TextView(MainActivity.this);
+                                    error.setText("No lyrics found.");
+                                    error.setTextColor(0xFF8892b0);
+                                    error.setTextSize(18);
+                                    lyricsContent.addView(error);
+                                }
+                            }
+                        });
+                        return;
+                    }
+                    parseLrc(synced, hasTimestamps);
                 } catch (Exception e) {
                     android.util.Log.e("DEBUG", "Failed to parse lyrics JSON", e);
                 }
@@ -2030,11 +2053,13 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void parseLrc(String lrc) {
+    private void parseLrc(String lrc, boolean hasTimestamps) {
         currentLyrics.clear();
         String[] lines = lrc.split("\n");
         for (String line : lines) {
-            if (line.startsWith("[")) {
+            if (!hasTimestamps) {
+                currentLyrics.add(new LyricLine(-1, line.trim()));
+            } else if (line.startsWith("[")) {
                 int endBracket = line.indexOf("]");
                 if (endBracket > 0) {
                     String timeStr = line.substring(1, endBracket);
@@ -2070,7 +2095,10 @@ public class MainActivity extends Activity {
                         tv.setOnClickListener(new View.OnClickListener() {
                             @Override
                             public void onClick(View v) {
-                                sendCommand("/api/spotify/seek?ms=" + currentLyrics.get(index).timeMs + "&type=absolute");
+                                int ms = currentLyrics.get(index).timeMs;
+                                if (ms >= 0) {
+                                    sendCommand("/api/spotify/seek?ms=" + ms + "&type=absolute");
+                                }
                             }
                         });
                         lyricsContent.addView(tv);

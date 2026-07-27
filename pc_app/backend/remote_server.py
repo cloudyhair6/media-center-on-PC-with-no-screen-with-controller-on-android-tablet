@@ -121,11 +121,18 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 artist = qs.get("artist", [""])[0]
                 url = f"http://127.0.0.1:9999/lyrics/?song={urllib.parse.quote(track)}&artist={urllib.parse.quote(artist)}&timestamps=true"
                 req = urllib.request.Request(url)
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    data = json.loads(response.read().decode('utf-8'))
-                    self._json_response(200, data)
-            except Exception as e:
-                self._json_response(500, {"status": "error", "message": str(e)})
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        data = json.loads(response.read().decode('utf-8'))
+                        self._json_response(200, data)
+                except urllib.error.HTTPError as e:
+                    try:
+                        data = json.loads(e.read().decode('utf-8'))
+                        self._json_response(e.code, data)
+                    except Exception:
+                        self._json_response(e.code, {"status": "error", "message": str(e)})
+                except Exception as e:
+                    self._json_response(500, {"status": "error", "message": str(e)})
             return
 
         # API: Spotify search
