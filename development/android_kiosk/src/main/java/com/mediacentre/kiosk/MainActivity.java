@@ -2025,7 +2025,7 @@ public class MainActivity extends Activity {
                 }
             }
             @Override
-            public void onError(Exception e) {
+            public void onError(String error) {
             }
         });
     }
