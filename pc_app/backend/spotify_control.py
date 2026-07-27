@@ -41,6 +41,7 @@ class SpotifyControl:
     _last_uri = ""
     _last_artwork_url = ""
     _last_album = ""
+    _last_context_uri = ""
 
     @staticmethod
     def get_artwork(uri: str) -> str:
@@ -138,6 +139,18 @@ class SpotifyControl:
     @staticmethod
     def play_uri(uri: str) -> None:
         SpotifyControl._run_cli(["play", uri])
+        
+        # Give CLI a split second to send the play command
+        import time
+        time.sleep(0.5)
+        
+        # Re-apply last known shuffle/repeat state if they were active
+        if SpotifyControl._last_metadata.get("shuffle", False):
+            SpotifyControl._run_cli(["shuffle", "on"])
+            
+        repeat = SpotifyControl._last_metadata.get("repeat", 0)
+        if repeat > 0:
+            SpotifyControl._run_cli(["repeat", "context" if repeat == 2 else "track"])
 
     @staticmethod
     def search(query: str, search_type: str = "track", limit: int = 5) -> dict:
@@ -250,8 +263,10 @@ class SpotifyControl:
                 SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
                 SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
                 state = SpotifyControl.get_shuffle_repeat()
-                SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
-                SpotifyControl._last_metadata["repeat"] = state["repeat"]
+                if state is not None:
+                    SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
+                    SpotifyControl._last_metadata["repeat"] = state["repeat"]
+                SpotifyControl._last_metadata["context_uri"] = SpotifyControl._last_context_uri
                 return SpotifyControl._last_metadata
 
             output = SpotifyControl._run_cli(["now-playing", "--format", "json"])
@@ -275,8 +290,10 @@ class SpotifyControl:
                 SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
                 SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
                 state = SpotifyControl.get_shuffle_repeat()
-                SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
-                SpotifyControl._last_metadata["repeat"] = state["repeat"]
+                if state is not None:
+                    SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
+                    SpotifyControl._last_metadata["repeat"] = state["repeat"]
+                SpotifyControl._last_metadata["context_uri"] = SpotifyControl._last_context_uri
                 return SpotifyControl._last_metadata
 
             try:
@@ -316,14 +333,15 @@ class SpotifyControl:
                 
                 # Use context_description as fallback if album is missing
                 album_text = SpotifyControl._last_album
-                if not album_text:
-                    album_text = cp.get("context_description", "")
+                context_desc = cp.get("context_description", "")
 
                 SpotifyControl._last_metadata = {
                     "playing": is_playing,
                     "title": title,
                     "artist": artist,
                     "album": album_text,
+                    "context": context_desc,
+                    "context_uri": SpotifyControl._last_context_uri,
                     "uri": uri,
                     "artwork": SpotifyControl._last_artwork_url,
                     "is_ad": is_ad
@@ -334,8 +352,9 @@ class SpotifyControl:
                 SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
                 
                 state = SpotifyControl.get_shuffle_repeat()
-                SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
-                SpotifyControl._last_metadata["repeat"] = state["repeat"]
+                if state is not None:
+                    SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
+                    SpotifyControl._last_metadata["repeat"] = state["repeat"]
 
                 return SpotifyControl._last_metadata
 
@@ -392,17 +411,17 @@ class SpotifyControl:
             async def _get_state():
                 manager = await GlobalSystemMediaTransportControlsSessionManager.request_async()
                 session = manager.get_current_session()
-                if session:
+                if session and "Spotify" in session.source_app_user_model_id:
                     info = session.get_playback_info()
                     return {
                         "shuffle": info.is_shuffle_active,
                         "repeat": int(info.auto_repeat_mode)
                     }
-                return {"shuffle": False, "repeat": 0}
+                return None
 
             return asyncio.run(_get_state())
         except Exception as e:
-            return {"shuffle": False, "repeat": 0}
+            return None
 
     @staticmethod
     def repeat(state: str) -> bool:

@@ -133,6 +133,9 @@
                     <Button android:id="@+id/btn_music_queue"
                         android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
                         android:text="Queue" android:textColor="#8892b0" android:background="#111827" />
+                    <Button android:id="@+id/btn_music_lyrics"
+                        android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                        android:text="Lyrics" android:textColor="#8892b0" android:background="#111827" />
                 </LinearLayout>
                 
                 <!-- Now Playing -->
@@ -140,6 +143,10 @@
                     android:layout_width="fill_parent" android:layout_height="fill_parent">
                     <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content"
                         android:orientation="vertical" android:gravity="center" android:padding="20dp">
+                        <TextView android:id="@+id/np_context"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:textColor="#8892b0" android:textSize="16sp" android:layout_marginBottom="10dp"
+                            android:visibility="gone" />
                         <RelativeLayout android:layout_width="200dp" android:layout_height="200dp" android:layout_marginBottom="20dp">
                             <ImageView android:id="@+id/np_artwork"
                                 android:layout_width="fill_parent" android:layout_height="fill_parent" />
@@ -261,6 +268,13 @@
                     android:layout_width="fill_parent" android:layout_height="fill_parent"
                     android:visibility="gone" android:padding="10dp">
                     <LinearLayout android:id="@+id/queue_content" android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+                </ScrollView>
+
+                <!-- Lyrics -->
+                <ScrollView android:id="@+id/music_lyrics"
+                    android:layout_width="fill_parent" android:layout_height="fill_parent"
+                    android:visibility="gone" android:padding="20dp">
+                    <LinearLayout android:id="@+id/lyrics_content" android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center_horizontal" />
                 </ScrollView>
             </LinearLayout>
             

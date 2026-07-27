@@ -111,6 +111,23 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 self._json_response(200, {"playing": False, "artist": "", "title": str(e), "album": "", "uri": ""})
             return
 
+        # API: Spotify lyrics
+        if path == "/api/spotify/lyrics":
+            try:
+                from urllib.parse import urlparse, parse_qs
+                import urllib.request
+                qs = parse_qs(urlparse(self.path).query)
+                track = qs.get("track", [""])[0]
+                artist = qs.get("artist", [""])[0]
+                url = f"http://127.0.0.1:9999/lyrics/?song={urllib.parse.quote(track)}&artist={urllib.parse.quote(artist)}&timestamps=true"
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                    self._json_response(200, data)
+            except Exception as e:
+                self._json_response(500, {"status": "error", "message": str(e)})
+            return
+
         # API: Spotify search
         if path.startswith("/api/spotify/search"):
             try:
@@ -210,6 +227,8 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 from backend.spotify_control import SpotifyControl
                 state = parse_qs(urlparse(self.path).query).get("state", ["true"])[0].lower() == "true"
                 res = SpotifyControl.shuffle(state)
+                if res:
+                    SpotifyControl._last_metadata["shuffle"] = state
                 self._json_response(200, {"ok": res})
             except Exception as e:
                 self._json_response(500, {"error": str(e)})
@@ -221,6 +240,8 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 from backend.spotify_control import SpotifyControl
                 state = parse_qs(urlparse(self.path).query).get("state", ["off"])[0]
                 res = SpotifyControl.repeat(state)
+                if res:
+                    SpotifyControl._last_metadata["repeat"] = 0 if state == "off" else (1 if state == "track" else 2)
                 self._json_response(200, {"ok": res})
             except Exception as e:
                 self._json_response(500, {"error": str(e)})
@@ -246,6 +267,7 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 uri = parse_qs(urlparse(self.path).query).get("uri", [""])[0]
                 if uri:
                     from backend.spotify_control import SpotifyControl
+                    SpotifyControl._last_context_uri = uri
                     SpotifyControl.play_uri(uri)
                     self._json_response(200, {"ok": True})
                 else:
@@ -540,6 +562,27 @@ class RemoteServer:
         self._server.dispatcher = self.dispatcher  # type: ignore
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        
+        # Start Lyrica subprocess
+        import subprocess
+        import sys
+        lyrica_dir = Path(__file__).resolve().parent / "lyrica"
+        if lyrica_dir.exists():
+            try:
+                self._lyrica_process = subprocess.Popen(
+                    [sys.executable, str(lyrica_dir / "run.py")],
+                    cwd=str(lyrica_dir),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=0x08000000  # CREATE_NO_WINDOW
+                )
+                logging.info("Started Lyrica server on port 9999")
+            except Exception as e:
+                logging.error(f"Failed to start Lyrica: {e}")
+                self._lyrica_process = None
+        else:
+            self._lyrica_process = None
+
         ip = get_local_ip()
         url = f"http://{ip}:{self.port}"
         print(f"[Media Centre] Remote control available at: {url}")
@@ -549,6 +592,12 @@ class RemoteServer:
         if self._server:
             self._server.shutdown()
             self._server = None
+        if hasattr(self, "_lyrica_process") and self._lyrica_process:
+            try:
+                self._lyrica_process.terminate()
+            except Exception:
+                pass
+            self._lyrica_process = None
 
     @property
     def url(self) -> str:
