@@ -396,21 +396,26 @@ class _RemoteHandler(BaseHTTPRequestHandler):
             try:
                 from urllib.parse import urlparse, parse_qs
                 from backend.spotify_control import SpotifyControl
+                import json as json_mod
                 uri = parse_qs(urlparse(self.path).query).get("uri", [""])[0]
                 if uri:
                     res = SpotifyControl._run_cli(["lookup", uri, "--format", "json"])
                     if res:
-                        data = json.loads(res)
-                        entities = data.get("entities", [])
-                        if entities:
-                            img_url = entities[0].get("image_url", "")
-                            if img_url:
-                                img_url = img_url.replace("https://", "http://")
-                                # 1e02 is 300x300 (Search size), b273 is 640x640 (High Quality), 4851 is 64x64 (Low Quality)
-                                low_res = img_url.replace("b273", "4851").replace("1e02", "4851")
-                                high_res = img_url.replace("4851", "b273").replace("1e02", "b273")
-                                self._json_response(200, {"thumbnail_url": low_res, "high_res_url": high_res})
-                                return
+                        try:
+                            data = json_mod.loads(res)
+                            entities = data.get("entities", [])
+                            if entities:
+                                img_url = entities[0].get("image_url", "")
+                                if img_url:
+                                    img_url = img_url.replace("https://", "http://")
+                                    # 1e02 is 300x300 (Search size), b273 is 640x640 (High Quality), 4851 is 64x64 (Low Quality)
+                                    low_res = img_url.replace("b273", "4851").replace("1e02", "4851")
+                                    high_res = img_url.replace("4851", "b273").replace("1e02", "b273")
+                                    self._json_response(200, {"thumbnail_url": low_res, "high_res_url": high_res})
+                                    return
+                        except Exception:
+                            pass
+                    
                     # Fallback if lookup fails
                     self._json_response(400, {"error": "Could not resolve artwork"})
                 else:

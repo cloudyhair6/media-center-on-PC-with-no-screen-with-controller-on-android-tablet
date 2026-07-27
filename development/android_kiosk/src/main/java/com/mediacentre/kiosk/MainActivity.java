@@ -164,6 +164,10 @@ public class MainActivity extends Activity {
                                         loadAlbumArt(uri);
                                     }
                                     checkIfLiked(uri);
+                                    
+                                    if (musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE) {
+                                        fetchLyrics(json.optString("title", ""), json.optString("artist", ""));
+                                    }
                                 }
                             }
                             
@@ -1989,17 +1993,14 @@ public class MainActivity extends Activity {
         currentLyricLineIndex = -1;
         if (lyricsContent != null) {
             lyricsContent.removeAllViews();
-            TextView loading = new TextView(this);
-            loading.setText("Loading lyrics...");
-            loading.setTextColor(0xFF8892b0);
-            loading.setTextSize(18);
-            lyricsContent.addView(loading);
         }
+        showLoading("Loading Lyrics...");
 
-        String url = "/api/spotify/lyrics?track=" + android.net.Uri.encode(track) + "&artist=" + android.net.Uri.encode(artist);
+        String url = "/api/spotify/lyrics?track=" + java.net.URLEncoder.encode(track) + "&artist=" + java.net.URLEncoder.encode(artist);
         api.get(url, new ApiClient.Callback() {
             @Override
             public void onSuccess(String response) {
+                hideLoading();
                 try {
                     JSONObject json = new JSONObject(response);
                     if (json.has("status") && json.optString("status").equals("error")) {
@@ -2049,6 +2050,7 @@ public class MainActivity extends Activity {
             }
             @Override
             public void onError(final String error) {
+                hideLoading();
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -2148,20 +2150,22 @@ public class MainActivity extends Activity {
             }
         }
         if (newIndex != currentLyricLineIndex) {
-            if (currentLyricLineIndex >= 0 && currentLyricLineIndex < currentLyrics.size()) {
-                LyricLine oldLine = currentLyrics.get(currentLyricLineIndex);
-                if (oldLine.view != null) {
-                    oldLine.view.setTextColor(0xFF8892b0);
-                    oldLine.view.setTextSize(22);
+            for (int i = 0; i < currentLyrics.size(); i++) {
+                LyricLine line = currentLyrics.get(i);
+                if (line.view != null) {
+                    if (i == newIndex) {
+                        line.view.setTextColor(0xFF00d4ff);
+                        line.view.setTextSize(26);
+                    } else {
+                        line.view.setTextColor(0xFF8892b0);
+                        line.view.setTextSize(22);
+                    }
                 }
             }
             currentLyricLineIndex = newIndex;
             if (currentLyricLineIndex >= 0 && currentLyricLineIndex < currentLyrics.size()) {
                 LyricLine newLine = currentLyrics.get(currentLyricLineIndex);
-                if (newLine.view != null) {
-                    newLine.view.setTextColor(0xFF00d4ff); // Highlight color
-                    newLine.view.setTextSize(26);
-                    // Center the line in scroll view
+                if (newLine.view != null && musicLyrics.getHeight() > 0) {
                     int scrollY = newLine.view.getTop() - (musicLyrics.getHeight() / 2) + (newLine.view.getHeight() / 2);
                     musicLyrics.smoothScrollTo(0, Math.max(0, scrollY));
                 }
