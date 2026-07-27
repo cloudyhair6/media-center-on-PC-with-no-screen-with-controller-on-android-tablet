@@ -90,7 +90,6 @@ class _RemoteHandler(BaseHTTPRequestHandler):
         if path == "/api/status":
             version = "v1.8"
             try:
-                import json
                 # updater_config.json is in the root directory (one above pc_app)
                 config_path = Path(__file__).resolve().parent.parent.parent / "updater_config.json"
                 if config_path.exists():
@@ -397,7 +396,6 @@ class _RemoteHandler(BaseHTTPRequestHandler):
             try:
                 from urllib.parse import urlparse, parse_qs
                 from backend.spotify_control import SpotifyControl
-                import json
                 uri = parse_qs(urlparse(self.path).query).get("uri", [""])[0]
                 if uri:
                     res = SpotifyControl._run_cli(["lookup", uri, "--format", "json"])

@@ -2048,7 +2048,34 @@ public class MainActivity extends Activity {
                 }
             }
             @Override
-            public void onError(String error) {
+            public void onError(final String error) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (lyricsContent != null) {
+                            lyricsContent.removeAllViews();
+                            TextView errView = new TextView(MainActivity.this);
+                            String errMsg = "Error loading lyrics";
+                            try {
+                                JSONObject json = new JSONObject(error);
+                                if (json.has("error")) {
+                                    errMsg = json.optJSONObject("error").optString("message", errMsg);
+                                } else {
+                                    errMsg = json.optString("message", errMsg);
+                                }
+                            } catch (Exception e) {
+                                // Not JSON
+                                if (error != null && !error.isEmpty()) {
+                                    errMsg = error;
+                                }
+                            }
+                            errView.setText(errMsg);
+                            errView.setTextColor(0xFF8892b0);
+                            errView.setTextSize(18);
+                            lyricsContent.addView(errView);
+                        }
+                    }
+                });
             }
         });
     }
