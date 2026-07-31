@@ -213,14 +213,16 @@ class SpotifyControl:
                             
                         return {
                             "position_s": int(pos),
-                            "length_s": int(tl.end_time.total_seconds())
+                            "length_s": int(tl.end_time.total_seconds()),
+                            "position_ms": int(pos * 1000),
+                            "length_ms": int(tl.end_time.total_seconds() * 1000)
                         }
                 except Exception:
                     pass
-                return {"position_s": 0, "length_s": 0}
+                return {"position_s": 0, "length_s": 0, "position_ms": 0, "length_ms": 0}
             return asyncio.run(fetch())
         except ImportError:
-            return {"position_s": 0, "length_s": 0}
+            return {"position_s": 0, "length_s": 0, "position_ms": 0, "length_ms": 0}
 
     @staticmethod
     def get_now_playing(force_fetch: bool = False) -> dict:
@@ -262,6 +264,8 @@ class SpotifyControl:
                 prog = SpotifyControl.get_playback_progress()
                 SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
                 SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
+                SpotifyControl._last_metadata["position_ms"] = prog.get("position_ms", 0)
+                SpotifyControl._last_metadata["length_ms"] = prog.get("length_ms", 0)
                 state = SpotifyControl.get_shuffle_repeat()
                 if state is not None:
                     SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
@@ -289,6 +293,8 @@ class SpotifyControl:
                 prog = SpotifyControl.get_playback_progress()
                 SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
                 SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
+                SpotifyControl._last_metadata["position_ms"] = prog.get("position_ms", 0)
+                SpotifyControl._last_metadata["length_ms"] = prog.get("length_ms", 0)
                 state = SpotifyControl.get_shuffle_repeat()
                 if state is not None:
                     SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
@@ -439,7 +445,7 @@ class SpotifyControl:
         try:
             with open(apo_config_path, "r") as f:
                 content = f.read()
-                return "Stage: pre-mix" in content and "C=0.5*L+0.5*R" in content
+                return "Stage: pre-mix" in content
         except Exception:
             return False
 

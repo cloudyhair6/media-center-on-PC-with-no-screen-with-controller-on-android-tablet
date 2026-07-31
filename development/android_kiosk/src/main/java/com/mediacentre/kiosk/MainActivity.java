@@ -130,13 +130,15 @@ public class MainActivity extends Activity {
                             }
                             currentPositionS = json.optInt("position_s", 0);
                             currentLengthS = json.optInt("length_s", 0);
+                            currentPositionMs = json.optInt("position_ms", currentPositionS * 1000);
+                            lastSyncTimeMs = System.currentTimeMillis();
                             if (npTimeCurrent != null) npTimeCurrent.setText(formatTime(currentPositionS));
                             if (npTimeTotal != null) npTimeTotal.setText(formatTime(currentLengthS));
                             if (npProgress != null) {
                                 npProgress.setMax(currentLengthS);
                                 npProgress.setProgress(currentPositionS);
                             }
-                            updateLyricsSync(currentPositionS * 1000);
+                            // Lyrics sync is now handled smoothly by lyricsSyncRunnable
                             String uri = json.optString("uri", "");
                             String ctxUri = json.optString("context_uri", "");
                             String ctxDesc = json.optString("context", "");
@@ -172,20 +174,16 @@ public class MainActivity extends Activity {
                             }
                             
                             // Sync shuffle and repeat states
-                            if (json.has("shuffle")) {
-                                shuffleOn = json.optBoolean("shuffle", false);
+                            if (json.has("shuffle_state")) {
+                                shuffleOn = json.optBoolean("shuffle_state", false);
                                 Button btnShuf = (Button) findViewById(R.id.btn_shuffle);
                                 if (btnShuf != null) {
                                     btnShuf.setText("Shuffle: " + (shuffleOn ? "ON" : "OFF"));
                                     btnShuf.setTextColor(shuffleOn ? 0xFF00d4ff : 0xFFffffff);
                                 }
                             }
-                            if (json.has("repeat")) {
-                                int rep = json.optInt("repeat", 0);
-                                if (rep == 1) repeatState = "track";
-                                else if (rep == 2) repeatState = "context";
-                                else repeatState = "off";
-                                
+                            if (json.has("repeat_state")) {
+                                repeatState = json.optString("repeat_state", "off");
                                 Button btnRep = (Button) findViewById(R.id.btn_repeat);
                                 if (btnRep != null) {
                                     String label = "OFF";
@@ -232,6 +230,21 @@ public class MainActivity extends Activity {
                 if (npProgress != null) npProgress.setProgress(currentPositionS);
             }
             handler.postDelayed(this, 1000);
+        }
+    };
+
+    private int currentPositionMs = 0;
+    private long lastSyncTimeMs = 0;
+
+    private Runnable lyricsSyncRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isNpPlaying && musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE) {
+                long elapsed = System.currentTimeMillis() - lastSyncTimeMs;
+                int estimatedMs = currentPositionMs + (int) elapsed;
+                updateLyricsSync(estimatedMs);
+            }
+            handler.postDelayed(this, 100);
         }
     };
 
@@ -371,6 +384,7 @@ public class MainActivity extends Activity {
 
         handler.post(pollSpotify);
         handler.post(progressExtrapolator);
+        handler.post(lyricsSyncRunnable);
         handler.post(pollSystemStats);
         handler.post(pollUnlock);
         handler.post(blockSettings);
@@ -1180,7 +1194,13 @@ public class MainActivity extends Activity {
         
         Button likedBtn = new Button(MainActivity.this);
         likedBtn.setText("My Liked Songs");
-        likedBtn.setTextColor(0xFF00d4ff);
+        if ("spotify:collection:tracks".equals(currentContextUri)) {
+            likedBtn.setTextColor(0xFF00FFaa);
+            likedBtn.setTypeface(null, android.graphics.Typeface.BOLD);
+        } else {
+            likedBtn.setTextColor(0xFF00d4ff);
+            likedBtn.setTypeface(null, android.graphics.Typeface.NORMAL);
+        }
         likedBtn.setTextSize(20);
         likedBtn.setPadding(20, 40, 20, 40);
         likedBtn.setOnClickListener(new View.OnClickListener() {
@@ -1653,6 +1673,18 @@ public class MainActivity extends Activity {
         
         // Find all views and update them
         applyThemeToView(root, bgPrimary, bgSecondary, textPrimary, textSecondary, theme.equals("native"));
+        
+        // Restore tab highlights which were overwritten by applyThemeToView
+        int currentMainTab = (tabMusic != null && tabMusic.getVisibility() == View.VISIBLE) ? 0 : 
+                             (tabSettings != null && tabSettings.getVisibility() == View.VISIBLE) ? 1 : 2;
+        switchTab(currentMainTab);
+        
+        int currentSubTab = 0;
+        if (musicSearch != null && musicSearch.getVisibility() == View.VISIBLE) currentSubTab = 1;
+        if (musicLibrary != null && musicLibrary.getVisibility() == View.VISIBLE) currentSubTab = 2;
+        if (musicQueue != null && musicQueue.getVisibility() == View.VISIBLE) currentSubTab = 3;
+        if (musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE) currentSubTab = 4;
+        switchMusicSubTab(currentSubTab);
     }
     
     private void applyThemeToView(View v, int bgP, int bgS, int textP, int textS, boolean isNative) {
@@ -2025,25 +2057,39 @@ public class MainActivity extends Activity {
                     if (data == null) {
                         return;
                     }
-                    String synced = data.optString("lyrics", "");
-                    boolean hasTimestamps = data.optBoolean("hasTimestamps", true);
-                    if (synced.isEmpty()) {
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (lyricsContent != null) {
-                                    lyricsContent.removeAllViews();
-                                    TextView error = new TextView(MainActivity.this);
-                                    error.setText("No lyrics found.");
-                                    error.setTextColor(0xFF8892b0);
-                                    error.setTextSize(18);
-                                    lyricsContent.addView(error);
-                                }
+                    JSONArray timedLyrics = data.optJSONArray("timed_lyrics");
+                    if (timedLyrics != null && timedLyrics.length() > 0) {
+                        currentLyrics.clear();
+                        for (int i = 0; i < timedLyrics.length(); i++) {
+                            JSONObject obj = timedLyrics.optJSONObject(i);
+                            if (obj != null) {
+                                int timeMs = obj.optInt("start_time", -1);
+                                String text = obj.optString("text", "");
+                                currentLyrics.add(new LyricLine(timeMs, text));
                             }
-                        });
-                        return;
+                        }
+                        renderLyrics();
+                    } else {
+                        String synced = data.optString("lyrics", "");
+                        boolean hasTimestamps = data.optBoolean("hasTimestamps", true);
+                        if (synced.isEmpty()) {
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (lyricsContent != null) {
+                                        lyricsContent.removeAllViews();
+                                        TextView error = new TextView(MainActivity.this);
+                                        error.setText("No lyrics found.");
+                                        error.setTextColor(0xFF8892b0);
+                                        error.setTextSize(18);
+                                        lyricsContent.addView(error);
+                                    }
+                                }
+                            });
+                            return;
+                        }
+                        parseLrc(synced, hasTimestamps);
                     }
-                    parseLrc(synced, hasTimestamps);
                 } catch (Exception e) {
                     android.util.Log.e("DEBUG", "Failed to parse lyrics JSON", e);
                 }
@@ -2105,6 +2151,10 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        renderLyrics();
+    }
+
+    private void renderLyrics() {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -2118,7 +2168,7 @@ public class MainActivity extends Activity {
                         tv.setTextSize(22);
                         tv.setPadding(0, 20, 0, 20);
                         tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                        tv.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                        tv.setLayoutParams(new LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
                         ll.view = tv;
                         final int index = i;
                         tv.setOnClickListener(new View.OnClickListener() {
