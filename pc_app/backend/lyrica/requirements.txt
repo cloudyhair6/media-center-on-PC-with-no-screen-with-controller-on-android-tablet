@@ -49,6 +49,7 @@ anyio==4.4.0                 # async compatibility layer used by httpx
 
 # ── HTTP (kept for metadata_extractor — sync parallel via ThreadPoolExecutor) ─
 requests==2.32.3
+urllib3>=1.26.0
 
 # ── Optional: Redis backend for Flask-Limiter (recommended for production) ───
 # redis==5.0.6

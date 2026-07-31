@@ -245,7 +245,10 @@
                             android:hint="Search Spotify..." android:textColor="#000000" android:textColorHint="#8892b0" android:singleLine="true" android:background="#ffffff" android:padding="10dp" />
                         <EditText android:id="@+id/search_limit" android:layout_width="50dp" android:layout_height="wrap_content" 
                             android:inputType="number" android:text="10" android:textColor="#000000" android:background="#ffffff" android:padding="10dp" android:layout_marginLeft="5dp" />
-                        <Spinner android:id="@+id/search_type_spinner" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="5dp" />
+                        <FrameLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="5dp" android:background="#1a1f36">
+                            <Spinner android:id="@+id/search_type_spinner" android:layout_width="110dp" android:layout_height="wrap_content" android:background="@null" android:popupBackground="#1a1f36" />
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="▼" android:textColor="#8892b0" android:textSize="14sp" android:layout_gravity="center_vertical|right" android:paddingRight="10dp" android:clickable="false" android:focusable="false" />
+                        </FrameLayout>
                         <Button android:id="@+id/btn_search" android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:text="Search" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginLeft="5dp" />
                     </LinearLayout>
