@@ -101,5 +101,7 @@ public final class R {
     }
     public static final class layout {
         public static final int activity_main=0x7f030000;
+        public static final int spinner_dropdown_item=0x7f030001;
+        public static final int spinner_item=0x7f030002;
     }
 }

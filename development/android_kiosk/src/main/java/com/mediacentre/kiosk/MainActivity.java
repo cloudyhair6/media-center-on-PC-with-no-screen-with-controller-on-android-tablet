@@ -174,16 +174,20 @@ public class MainActivity extends Activity {
                             }
                             
                             // Sync shuffle and repeat states
-                            if (json.has("shuffle_state")) {
-                                shuffleOn = json.optBoolean("shuffle_state", false);
+                            if (json.has("shuffle")) {
+                                shuffleOn = json.optBoolean("shuffle", false);
                                 Button btnShuf = (Button) findViewById(R.id.btn_shuffle);
                                 if (btnShuf != null) {
                                     btnShuf.setText("Shuffle: " + (shuffleOn ? "ON" : "OFF"));
                                     btnShuf.setTextColor(shuffleOn ? 0xFF00d4ff : 0xFFffffff);
                                 }
                             }
-                            if (json.has("repeat_state")) {
-                                repeatState = json.optString("repeat_state", "off");
+                            if (json.has("repeat")) {
+                                int rep = json.optInt("repeat", 0);
+                                if (rep == 1) repeatState = "track";
+                                else if (rep == 2) repeatState = "context";
+                                else repeatState = "off";
+                                
                                 Button btnRep = (Button) findViewById(R.id.btn_repeat);
                                 if (btnRep != null) {
                                     String label = "OFF";
@@ -916,8 +920,8 @@ public class MainActivity extends Activity {
         // Search setup
         Spinner typeSpinner = (Spinner) findViewById(R.id.search_type_spinner);
         String[] types = new String[]{"track", "album", "artist", "playlist"};
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, types);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, R.layout.spinner_item, types);
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
         typeSpinner.setAdapter(adapter);
         
         ((Button) findViewById(R.id.btn_search)).setOnClickListener(new View.OnClickListener() {
@@ -1674,17 +1678,29 @@ public class MainActivity extends Activity {
         // Find all views and update them
         applyThemeToView(root, bgPrimary, bgSecondary, textPrimary, textSecondary, theme.equals("native"));
         
-        // Restore tab highlights which were overwritten by applyThemeToView
+        // Restore tab highlights manually to avoid triggering loadLibrary() loops
         int currentMainTab = (tabMusic != null && tabMusic.getVisibility() == View.VISIBLE) ? 0 : 
                              (tabSettings != null && tabSettings.getVisibility() == View.VISIBLE) ? 1 : 2;
-        switchTab(currentMainTab);
+        if (tabButtons != null) {
+            for (int i = 0; i < tabButtons.length; i++) {
+                if (tabButtons[i] != null) tabButtons[i].setTextColor(i == currentMainTab ? 0xFF00d4ff : 0xFF8892b0);
+            }
+        }
         
         int currentSubTab = 0;
         if (musicSearch != null && musicSearch.getVisibility() == View.VISIBLE) currentSubTab = 1;
         if (musicLibrary != null && musicLibrary.getVisibility() == View.VISIBLE) currentSubTab = 2;
         if (musicQueue != null && musicQueue.getVisibility() == View.VISIBLE) currentSubTab = 3;
         if (musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE) currentSubTab = 4;
-        switchMusicSubTab(currentSubTab);
+        
+        if (musicSubTabButtons != null) {
+            for (int i = 0; i < musicSubTabButtons.length; i++) {
+                if (musicSubTabButtons[i] != null) {
+                    musicSubTabButtons[i].setTextColor(i == currentSubTab ? 0xFF00d4ff : 0xFF8892b0);
+                    musicSubTabButtons[i].setBackgroundColor(i == currentSubTab ? 0xFF1a1f36 : 0xFF111827);
+                }
+            }
+        }
     }
     
     private void applyThemeToView(View v, int bgP, int bgS, int textP, int textS, boolean isNative) {
