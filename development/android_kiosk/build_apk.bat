@@ -6,22 +6,28 @@ set JAVA_HOME=C:\Program Files\Java\jdk1.8.0_481
 set PATH=%JAVA_HOME%\bin;%PATH%
 
 if exist app.apk del /q app.apk
+if exist bin rmdir /s /q bin
+if exist obj rmdir /s /q obj
 
-if not exist bin mkdir bin
+mkdir bin
+mkdir obj
 echo [1] Generating R.java and Packaging APK resources...
 "%BUILD_TOOLS%\aapt.exe" package -f -m -J src\main\java -M src\main\AndroidManifest.xml -S src\main\res -I "%PLATFORM%\android.jar" -F bin\app.unaligned.apk
+if errorlevel 1 ( echo [ERROR] AAPT Failed & exit /b 1 )
 
 echo [2] Compiling Java...
-if not exist obj mkdir obj
-"%JAVA_HOME%\bin\javac.exe" -encoding UTF-8 -d obj -cp "%PLATFORM%\android.jar" -source 1.7 -target 1.7 src\main\java\com\mediacentre\kiosk\*.java
+"%JAVA_HOME%\bin\javac.exe" -Xlint:-options -Xlint:-deprecation -encoding UTF-8 -d obj -cp "%PLATFORM%\android.jar" -source 1.7 -target 1.7 src\main\java\com\mediacentre\kiosk\*.java
+if errorlevel 1 ( echo [ERROR] Javac Failed & exit /b 1 )
 
 echo [3] Converting to DEX...
 call "%JAVA_HOME%\bin\jar.exe" cvf bin\classes.jar -C obj .
-call "%JAVA_HOME%\bin\java.exe" -cp "%BUILD_TOOLS%\lib\d8.jar" com.android.tools.r8.D8 --min-api 10 --output bin\ bin\classes.jar
+call "%JAVA_HOME%\bin\java.exe" -cp "%BUILD_TOOLS%\lib\d8.jar" com.android.tools.r8.D8 --min-api 10 --lib "%PLATFORM%\android.jar" --output bin\ bin\classes.jar
+if errorlevel 1 ( echo [ERROR] D8 DEX Failed & exit /b 1 )
 
 echo [4] Adding DEX to APK...
 cd bin
 "%BUILD_TOOLS%\aapt.exe" add app.unaligned.apk classes.dex
+if errorlevel 1 ( cd .. & echo [ERROR] Failed to add classes.dex & exit /b 1 )
 cd ..
 
 
