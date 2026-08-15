@@ -124,20 +124,18 @@ class MainWindow(QMainWindow):
         self._clock_timer = QTimer(self)
         self._clock_timer.setInterval(1000)
         self._clock_timer.timeout.connect(self._update_clock)
-        self._clock_timer.timeout.connect(self._check_config)
         self._clock_timer.start()
+        
+        # Config file watcher
+        from PySide6.QtCore import QFileSystemWatcher
+        self._config_watcher = QFileSystemWatcher(self)
+        config_path = Path(__file__).resolve().parent.parent / 'config.json'
+        if config_path.exists():
+            self._config_watcher.addPath(str(config_path))
+        self._config_watcher.fileChanged.connect(self._on_config_changed)
 
-    def _check_config(self):
-        try:
-            import os
-            config_path = Path(__file__).resolve().parent.parent / 'config.json'
-            if config_path.exists():
-                mtime = os.path.getmtime(config_path)
-                if mtime > self._last_config_mtime:
-                    self._last_config_mtime = mtime
-                    self._apply_theme()
-        except Exception:
-            pass
+    def _on_config_changed(self, path: str):
+        self._apply_theme()
 
     def _apply_theme(self):
         colors = get_active_colors()

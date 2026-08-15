@@ -6,6 +6,9 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import threading
+import time
+
 logger = logging.getLogger("metadata_extractor")
 
 # APIs we'll use (all free, no auth required)
@@ -14,12 +17,24 @@ MUSICBRAINZ_API = "https://musicbrainz.org/ws/2"
 WIKIPEDIA_API = "https://en.wikipedia.org/api/rest_v1"
 ITUNES_API = "https://itunes.apple.com/search"
 
+_mb_lock = threading.Lock()
+_mb_last_call = 0.0
+ITUNES_API = "https://itunes.apple.com/search"
+
 def get_musicbrainz_metadata(artist: str, song: str) -> Optional[Dict]:
     """
     Get metadata from MusicBrainz API (free, no auth required)
     Returns: MBID, recording info, release info, tags, etc.
     """
+    global _mb_last_call
     try:
+        with _mb_lock:
+            now = time.time()
+            elapsed = now - _mb_last_call
+            if elapsed < 1.0:
+                time.sleep(1.0 - elapsed)
+            _mb_last_call = time.time()
+
         # Search for recording with additional includes for more data
         headers = {
             "User-Agent": "Lyrica/1.0 (lyrics API)"
@@ -272,7 +287,7 @@ def get_song_metadata(artist: str, song: str) -> Dict:
                 "release_date":   release_date,
                 "release_title":  release_title,
                 "duration_ms":    mb_data.get("length", 0),
-                "tags":           [tag.get("name") for tag in mb_data.get("tags", [])[:5]],
+                "tags":           [tag.get("name") for tag in (mb_data.get("tags") or [])[:5]],
             })
             artist_credit = mb_data.get("artist-credit", [])
             metadata["artist"] = (

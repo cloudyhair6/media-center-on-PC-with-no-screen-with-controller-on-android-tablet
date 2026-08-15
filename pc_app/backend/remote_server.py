@@ -148,7 +148,7 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                     # Convert to unified items list for Android 2.3 client
                     items = []
                     for k in ["tracks", "albums", "artists", "playlists"]:
-                        if k in res:
+                        if k in res and res[k]:
                             for item in res[k]:
                                 artists = item.get("artists", [])
                                 artist_name = artists[0] if artists else ""
@@ -504,7 +504,11 @@ class _RemoteHandler(BaseHTTPRequestHandler):
 
         if file_path.is_file():
             content_type = self._guess_type(file_path.suffix)
-            data = file_path.read_bytes()
+            try:
+                data = file_path.read_bytes()
+            except OSError:
+                self._text_response(403, "Forbidden")
+                return
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
@@ -546,14 +550,14 @@ class _RemoteHandler(BaseHTTPRequestHandler):
 
 
 def get_local_ip() -> str:
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        return s.getsockname()[0]
     except Exception:
         return "127.0.0.1"
+    finally:
+        s.close()
 
 
 class RemoteServer:

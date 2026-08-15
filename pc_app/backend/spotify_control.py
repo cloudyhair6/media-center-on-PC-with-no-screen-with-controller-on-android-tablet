@@ -203,6 +203,8 @@ class SpotifyControl:
                     if session:
                         tl = session.get_timeline_properties()
                         pb = session.get_playback_info()
+                        if tl is None:
+                            return {"position_s": 0, "length_s": 0, "position_ms": 0, "length_ms": 0}
                         
                         pos = tl.position.total_seconds()
                         if pb and pb.playback_status == 4: # Playing
@@ -270,7 +272,8 @@ class SpotifyControl:
                 if state is not None:
                     SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
                     SpotifyControl._last_metadata["repeat"] = state["repeat"]
-                SpotifyControl._last_metadata["context_uri"] = SpotifyControl._last_context_uri
+                SpotifyControl._last_metadata["context_uri"] = getattr(SpotifyControl, "_last_context_uri", "")
+                SpotifyControl._last_metadata["context"] = getattr(SpotifyControl, "_last_context_desc", "")
                 return SpotifyControl._last_metadata
 
             output = SpotifyControl._run_cli(["now-playing", "--format", "json"])
@@ -285,10 +288,12 @@ class SpotifyControl:
                         "title": parts[1].strip(),
                         "album": "",
                         "uri": "",
-                        "artwork": SpotifyControl._last_artwork_url
+                        "artwork": SpotifyControl._last_artwork_url,
+                        "context": getattr(SpotifyControl, "_last_context_desc", ""),
+                        "context_uri": getattr(SpotifyControl, "_last_context_uri", "")
                     }
                 else:
-                    SpotifyControl._last_metadata = {"playing": False, "artist": "", "title": "Spotify", "album": "", "uri": "", "artwork": ""}
+                    SpotifyControl._last_metadata = {"playing": False, "artist": "", "title": "Spotify", "album": "", "uri": "", "artwork": "", "context": "", "context_uri": ""}
                 
                 prog = SpotifyControl.get_playback_progress()
                 SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
@@ -314,7 +319,8 @@ class SpotifyControl:
                     SpotifyControl._last_uri = uri
                     try:
                         lookup_out = SpotifyControl._run_cli(["lookup", uri, "--format", "json"])
-                        ent = json.loads(lookup_out).get("entities", [{}])[0]
+                        entities = json.loads(lookup_out).get("entities", [])
+                        ent = entities[0] if entities else {}
                         SpotifyControl._last_artwork_url = ent.get("image_url", "")
                         SpotifyControl._last_album = ent.get("parent", {}).get("name", "")
                     except Exception:
@@ -339,7 +345,33 @@ class SpotifyControl:
                 
                 # Use context_description as fallback if album is missing
                 album_text = SpotifyControl._last_album
+                
+                # Try to extract context from API response
+                ctx_obj = cp.get("context", {})
+                if ctx_obj and isinstance(ctx_obj, dict):
+                    actual_ctx_uri = ctx_obj.get("uri", "")
+                    if actual_ctx_uri:
+                        SpotifyControl._last_context_uri = actual_ctx_uri
+                
                 context_desc = cp.get("context_description", "")
+                if not context_desc:
+                    if not hasattr(SpotifyControl, '_last_fetched_context_uri') or SpotifyControl._last_context_uri != getattr(SpotifyControl, '_last_fetched_context_uri', ''):
+                        setattr(SpotifyControl, '_last_fetched_context_uri', SpotifyControl._last_context_uri)
+                        if SpotifyControl._last_context_uri == "spotify:collection:tracks":
+                            setattr(SpotifyControl, '_last_context_desc', "Liked Songs")
+                        elif SpotifyControl._last_context_uri:
+                            try:
+                                lookup_out = SpotifyControl._run_cli(["lookup", SpotifyControl._last_context_uri, "--format", "json"])
+                                ent = json.loads(lookup_out).get("entities", [{}])[0]
+                                setattr(SpotifyControl, '_last_context_desc', ent.get("name", ""))
+                            except Exception:
+                                setattr(SpotifyControl, '_last_context_desc', "")
+                        else:
+                            setattr(SpotifyControl, '_last_context_desc', "")
+                    context_desc = getattr(SpotifyControl, '_last_context_desc', "")
+                else:
+                    setattr(SpotifyControl, '_last_context_desc', context_desc)
+                    setattr(SpotifyControl, '_last_fetched_context_uri', SpotifyControl._last_context_uri)
 
                 SpotifyControl._last_metadata = {
                     "playing": is_playing,

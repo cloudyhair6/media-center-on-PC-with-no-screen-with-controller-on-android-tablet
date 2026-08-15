@@ -114,7 +114,7 @@ class UpdateWorker(QThread):
             self.error.emit(f"Could not fetch update index: {e}")
             return
 
-        files = index.get("files", [])
+        files = index.get("files", []) if isinstance(index, dict) else []
         total = len(files)
 
         if total == 0:
@@ -148,7 +148,10 @@ class UpdateWorker(QThread):
                 continue
 
         # Update local version file
-        version_file = PROJECT_ROOT / "version.txt"
-        version_file.write_text(version + "\n", encoding="utf-8")
+        try:
+            version_file = PROJECT_ROOT / "version.txt"
+            version_file.write_text(version + "\n", encoding="utf-8")
+        except OSError as e:
+            self.error.emit(f"Failed to save version file: {e}")
 
         self.update_complete.emit(True, f"Updated to version {version}")

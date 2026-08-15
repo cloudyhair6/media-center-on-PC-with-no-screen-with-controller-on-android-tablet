@@ -515,9 +515,15 @@ class TrendingAnalyticsEngine:
                     # Extract duration
                     duration = None
                     if 'durationMs' in item:
-                        duration = int(item['durationMs'] / 1000)
+                        try:
+                            duration = int(float(item['durationMs']) / 1000)
+                        except (ValueError, TypeError):
+                            pass
                     elif 'duration' in item:
-                        duration = item['duration']
+                        try:
+                            duration = int(float(item['duration']))
+                        except (ValueError, TypeError):
+                            pass
                     
                     # Extract explicit flag
                     explicit = item.get('contentAdvisoryRating') == 'explicit' or item.get('isExplicit', False)

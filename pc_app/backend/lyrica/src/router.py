@@ -19,21 +19,27 @@ logger = get_logger("router")
 # Initialize Trending Analytics Engine (global instance)
 trending_engine = TrendingAnalyticsEngine(cache_ttl_hours=24)
 
-# Helper function to run async functions in sync context
 def run_async(coro, timeout=30):
     """Run async coroutine safely in sync context with timeout"""
     try:
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
         if loop.is_running():
             import nest_asyncio
             nest_asyncio.apply()
-            return asyncio.run(coro)
+            return asyncio.run_coroutine_threadsafe(asyncio.wait_for(coro, timeout=timeout), loop).result()
+            
         return loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
     except asyncio.TimeoutError:
         logger.error("Async operation timed out")
         raise Exception("Request timed out - operation took too long")
-    except RuntimeError:
-        return asyncio.run(asyncio.wait_for(coro, timeout=timeout))
+    except Exception as e:
+        logger.error(f"Async execution error: {str(e)}")
+        raise e
 
 
 def register_routes(app):

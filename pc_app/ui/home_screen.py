@@ -117,13 +117,14 @@ class HomeScreen(QWidget):
 
         # ---------- IP display at bottom
         import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
-            s.close()
         except Exception:
             ip = "127.0.0.1"
+        finally:
+            s.close()
 
         ip_label = QLabel(f"PC IP Address: {ip}")
         ip_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
@@ -132,10 +133,10 @@ class HomeScreen(QWidget):
             f"color: {Colors.TEXT_MUTED}; "
             f"background: transparent;"
         )
-        main_layout.addWidget(ip_label)
-
         # ---------- bottom stretch
         main_layout.addStretch(1)
+        
+        main_layout.addWidget(ip_label)
 
     # -------------------------------------------------------------- Clock
     def _setup_clock(self) -> None:

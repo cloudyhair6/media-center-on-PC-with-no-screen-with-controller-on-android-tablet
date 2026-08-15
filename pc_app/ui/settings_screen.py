@@ -115,6 +115,7 @@ class SettingsScreen(QWidget):
 
     go_back = Signal()
     setting_changed = Signal(str, str)  # key, value
+    _bt_devices_loaded = Signal(list)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -124,6 +125,7 @@ class SettingsScreen(QWidget):
         self._cfg = Config.get()
         self._setup_ui()
         self._load_initial_values()
+        self._bt_devices_loaded.connect(self._on_bt_devices_loaded)
 
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -398,18 +400,27 @@ class SettingsScreen(QWidget):
 
     def _refresh_bluetooth_devices(self) -> None:
         self._clear_bt_devices()
-        try:
-            devices = SystemControl.get_bluetooth_devices()
-            if devices:
-                for dev in devices:
-                    row = _DeviceRow(dev["name"], dev["status"])
-                    self._bt_device_rows.append(row)
-                    self._bt_devices_container.addWidget(row)
-            else:
-                self._bt_status_label.setText("No paired devices found.")
-                self._bt_status_label.setVisible(True)
-        except Exception:
-            self._bt_status_label.setText("Could not scan devices.")
+        import threading
+        
+        def worker():
+            try:
+                devices = SystemControl.get_bluetooth_devices()
+                self._bt_devices_loaded.emit(devices)
+            except Exception:
+                self._bt_devices_loaded.emit([])
+        
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_bt_devices_loaded(self, devices: list) -> None:
+        self._clear_bt_devices()
+        if devices:
+            self._bt_status_label.setVisible(False)
+            for dev in devices:
+                row = _DeviceRow(dev["name"], dev["status"])
+                self._bt_device_rows.append(row)
+                self._bt_devices_container.addWidget(row)
+        else:
+            self._bt_status_label.setText("No paired devices found or error scanning.")
             self._bt_status_label.setVisible(True)
 
     def _clear_bt_devices(self) -> None:
@@ -419,7 +430,6 @@ class SettingsScreen(QWidget):
         self._bt_device_rows.clear()
 
     # ---- App settings
-    setting_changed = Signal(str, str)
 
     def _on_startup_toggled(self, is_on: bool) -> None:
         success, msg = Config.set_startup_on_boot(is_on)
@@ -427,7 +437,10 @@ class SettingsScreen(QWidget):
 
     def _on_window_mode_changed(self, mode: str) -> None:
         self._cfg["window_mode"] = mode
-        Config.save()
+        try:
+            Config.save()
+        except OSError:
+            pass
         self.setting_changed.emit("window_mode", mode)
 
     def _on_update_toggled(self, is_on: bool) -> None:

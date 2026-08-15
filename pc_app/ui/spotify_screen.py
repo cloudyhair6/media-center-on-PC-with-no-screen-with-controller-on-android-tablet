@@ -17,16 +17,19 @@ class SpotifyScreen(QWidget):
     """Full-screen Spotify player with large visuals for projector display."""
 
     go_back = Signal()
+    _info_loaded = Signal(dict)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("SpotifyScreen")
         self._setup_ui()
+        self._info_loaded.connect(self._on_info_loaded)
 
         # Poll track info every 2 seconds
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(2000)
         self._poll_timer.timeout.connect(self._refresh_now_playing)
+        self._poll_timer.start()
 
     # ------------------------------------------------------------------ UI
     def _setup_ui(self) -> None:
@@ -226,8 +229,15 @@ class SpotifyScreen(QWidget):
             self._play_btn.setFocus()
 
         self._launch_frame.setVisible(False)
-        info = SpotifyControl.get_now_playing()
+        
+        import threading
+        def worker():
+            info = SpotifyControl.get_now_playing()
+            self._info_loaded.emit(info)
+        
+        threading.Thread(target=worker, daemon=True).start()
 
+    def _on_info_loaded(self, info: dict) -> None:
         if info.get("playing"):
             self._title_label.setText(info.get("title", ""))
             self._artist_label.setText(info.get("artist", ""))
