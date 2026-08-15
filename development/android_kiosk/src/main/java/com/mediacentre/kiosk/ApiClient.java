@@ -33,8 +33,11 @@ public class ApiClient {
                     conn.setReadTimeout(5000);
                     
                     int code = conn.getResponseCode();
-                    BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(code >= 400 ? conn.getErrorStream() : conn.getInputStream()));
+                    java.io.InputStream is = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                    if (is == null) {
+                        return new String[]{"error", "No response body from server"};
+                    }
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(is));
                     StringBuilder sb = new StringBuilder();
                     String line;
                     while ((line = reader.readLine()) != null) {

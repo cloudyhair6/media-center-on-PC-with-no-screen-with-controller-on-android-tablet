@@ -9,6 +9,9 @@ if exist app.apk del /q app.apk
 if exist bin rmdir /s /q bin
 if exist obj rmdir /s /q obj
 
+echo [0] Cleaning up sync conflicts...
+del /s /q "src\main\java\com\mediacentre\kiosk\*-*.java" 2>nul
+
 mkdir bin
 mkdir obj
 echo [1] Generating R.java and Packaging APK resources...

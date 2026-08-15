@@ -788,6 +788,11 @@ public class MainActivity extends Activity {
             if (queueContainer != null) queueContainer.removeAllViews();
         }
         
+        if (index != 1) {
+            LinearLayout searchContainer = (LinearLayout) findViewById(R.id.search_results);
+            if (searchContainer != null) searchContainer.removeAllViews();
+        }
+        
         if (index == 4) {
             fetchLyrics(npTitle.getText().toString(), npArtist.getText().toString());
         }
@@ -2120,16 +2125,16 @@ public class MainActivity extends Activity {
                             lyricsContent.removeAllViews();
                             TextView errView = new TextView(MainActivity.this);
                             String errMsg = "Error loading lyrics";
-                            try {
-                                JSONObject json = new JSONObject(error);
-                                if (json.has("error")) {
-                                    errMsg = json.optJSONObject("error").optString("message", errMsg);
-                                } else {
-                                    errMsg = json.optString("message", errMsg);
-                                }
-                            } catch (Exception e) {
-                                // Not JSON
-                                if (error != null && !error.isEmpty()) {
+                            if (error != null && !error.isEmpty()) {
+                                try {
+                                    JSONObject json = new JSONObject(error);
+                                    if (json.has("error")) {
+                                        errMsg = json.optJSONObject("error").optString("message", errMsg);
+                                    } else {
+                                        errMsg = json.optString("message", errMsg);
+                                    }
+                                } catch (Exception e) {
+                                    // Not JSON
                                     errMsg = error;
                                 }
                             }
@@ -2198,6 +2203,8 @@ public class MainActivity extends Activity {
                         });
                         lyricsContent.addView(tv);
                     }
+                    // Force updateLyricsSync to apply colors immediately on the next tick
+                    currentLyricLineIndex = -2;
                 }
             }
         });

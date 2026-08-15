@@ -19,8 +19,8 @@ if not exist "%~dp0venv\Scripts\activate.bat" (
 )
 call "%~dp0venv\Scripts\activate.bat"
 
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install --upgrade pip --no-cache-dir
+python -m pip install -r requirements.txt --no-cache-dir
 
 REM Start the app
 cd /d "%~dp0pc_app"
