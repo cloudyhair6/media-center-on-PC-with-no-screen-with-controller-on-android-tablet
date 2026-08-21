@@ -7,6 +7,7 @@ import ctypes.wintypes
 import subprocess
 import time
 from pathlib import Path
+import psutil
 
 # Virtual-key codes for media keys
 VK_MEDIA_PLAY_PAUSE = 0xB3
@@ -246,11 +247,7 @@ class SpotifyControl:
                             pid = ctypes.wintypes.DWORD()
                             ctypes.windll.user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
                             try:
-                                result = subprocess.run(
-                                    ["tasklist", "/FI", f"PID eq {pid.value}", "/NH", "/FO", "CSV"],
-                                    capture_output=True, text=True, timeout=2, creationflags=0x08000000
-                                )
-                                if "Spotify" in result.stdout:
+                                if "spotify" in psutil.Process(pid.value).name().lower():
                                     titles.append(title)
                             except Exception:
                                 pass

@@ -10,9 +10,11 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
+import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -34,7 +36,9 @@ import android.widget.ArrayAdapter;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.URL;
 
 public class MainActivity extends Activity {
@@ -104,8 +108,7 @@ public class MainActivity extends Activity {
                 handler.postDelayed(this, 1000);
                 return;
             }
-            boolean isMusicActive = (musicNowPlaying != null && musicNowPlaying.getVisibility() == View.VISIBLE) || (musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE);
-            if (screenMain.getVisibility() == View.VISIBLE && tabMusic.getVisibility() == View.VISIBLE && isMusicActive) {
+            if (screenMain.getVisibility() == View.VISIBLE && tabMusic.getVisibility() == View.VISIBLE) {
                 isSpotifyPolling = true;
                 api.get("/api/spotify/now_playing", new ApiClient.Callback() {
                     @Override
@@ -296,6 +299,135 @@ public class MainActivity extends Activity {
         }
     };
 
+    // Bitmap Cache & OOM Optimization for Dalvik on legacy ARMv7 hardware (Kindle Fire)
+    private static class BitmapCache {
+        private static final int MAX_SIZE_BYTES = 4 * 1024 * 1024; // 4MB cache cap
+        private final java.util.LinkedHashMap<String, Bitmap> cache;
+        private int currentSizeBytes = 0;
+
+        public BitmapCache() {
+            this.cache = new java.util.LinkedHashMap<String, Bitmap>(16, 0.75f, true);
+        }
+
+        public synchronized Bitmap get(String key) {
+            if (key == null) return null;
+            return cache.get(key);
+        }
+
+        public synchronized void put(String key, Bitmap bitmap) {
+            if (key == null || bitmap == null || bitmap.isRecycled()) return;
+            int size = getBitmapSize(bitmap);
+            if (size > MAX_SIZE_BYTES) return;
+
+            Bitmap existing = cache.put(key, bitmap);
+            if (existing != null) {
+                currentSizeBytes -= getBitmapSize(existing);
+            }
+            currentSizeBytes += size;
+
+            while (currentSizeBytes > MAX_SIZE_BYTES && !cache.isEmpty()) {
+                java.util.Map.Entry<String, Bitmap> entry = cache.entrySet().iterator().next();
+                Bitmap removed = entry.getValue();
+                cache.remove(entry.getKey());
+                if (removed != null) {
+                    currentSizeBytes -= getBitmapSize(removed);
+                }
+            }
+        }
+
+        public synchronized void clear() {
+            cache.clear();
+            currentSizeBytes = 0;
+        }
+
+        private int getBitmapSize(Bitmap bitmap) {
+            if (bitmap == null || bitmap.isRecycled()) return 0;
+            return bitmap.getRowBytes() * bitmap.getHeight();
+        }
+    }
+
+    private BitmapCache bitmapCache = new BitmapCache();
+
+    private static Bitmap decodeSampledBitmapFromBytes(byte[] data, int reqWidth, int reqHeight) {
+        if (data == null || data.length == 0) return null;
+        try {
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inPreferredConfig = Bitmap.Config.RGB_565;
+            if (reqWidth > 0 && reqHeight > 0) {
+                options.inJustDecodeBounds = true;
+                BitmapFactory.decodeByteArray(data, 0, data.length, options);
+                options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight);
+                options.inJustDecodeBounds = false;
+            }
+            return BitmapFactory.decodeByteArray(data, 0, data.length, options);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static int calculateInSampleSize(BitmapFactory.Options options, int reqWidth, int reqHeight) {
+        int height = options.outHeight;
+        int width = options.outWidth;
+        int inSampleSize = 1;
+        if (height > reqHeight || width > reqWidth) {
+            int halfHeight = height / 2;
+            int halfWidth = width / 2;
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2;
+            }
+        }
+        return Math.max(1, inSampleSize);
+    }
+
+    private static byte[] downloadUrlToBytes(String urlStr) {
+        InputStream is = null;
+        ByteArrayOutputStream baos = null;
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            is = conn.getInputStream();
+            baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[2048];
+            int len;
+            while ((len = is.read(buf)) != -1) {
+                baos.write(buf, 0, len);
+            }
+            return baos.toByteArray();
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (baos != null) try { baos.close(); } catch (Exception ignored) {}
+            if (is != null) try { is.close(); } catch (Exception ignored) {}
+            if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
+        }
+    }
+
+    private void clearContainerViews(ViewGroup container) {
+        if (container == null) return;
+        for (int i = 0; i < container.getChildCount(); i++) {
+            releaseViewBitmaps(container.getChildAt(i));
+        }
+        container.removeAllViews();
+    }
+
+    private void releaseViewBitmaps(View v) {
+        if (v == null) return;
+        if (v instanceof ImageView) {
+            ImageView iv = (ImageView) v;
+            iv.setTag(null);
+            iv.setImageBitmap(null);
+            iv.setImageDrawable(null);
+        } else if (v instanceof ViewGroup) {
+            ViewGroup vg = (ViewGroup) v;
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                releaseViewBitmaps(vg.getChildAt(i));
+            }
+        }
+    }
+
     private Runnable pollUnlock = new Runnable() {
         @Override
         public void run() {
@@ -306,37 +438,44 @@ public class MainActivity extends Activity {
                         try {
                             JSONObject json = new JSONObject(response);
                             if (json.optBoolean("unlock", false)) {
-                                if (getApplicationContext().getSharedPreferences("MediaCentre", MODE_PRIVATE).getBoolean("unlocked", false)) return;
-                                getApplicationContext().getSharedPreferences("MediaCentre", MODE_PRIVATE).edit().putBoolean("unlocked", true).commit();
-                                
                                 allowSettings = true;
+                                handler.removeCallbacks(blockSettings);
+                                getApplicationContext().getSharedPreferences("MediaCentre", MODE_PRIVATE)
+                                    .edit().putBoolean("unlocked", true).commit();
                                 
+                                try {
+                                    getPackageManager().clearPackagePreferredActivities(getPackageName());
+                                } catch (Exception ignored) {}
+
                                 final String[] launchers = {"Kindle Launcher", "ADW Launcher", "Android Settings"};
                                 final String[] packages = {"com.amazon.kindle.otter.launcher", "org.adw.launcher", "com.android.settings"};
                                 
-                                new AlertDialog.Builder(MainActivity.this)
-                                    .setTitle("Unlocked - Choose App")
-                                    .setItems(launchers, new DialogInterface.OnClickListener() {
-                                        @Override
-                                        public void onClick(DialogInterface dialog, int which) {
-                                            try {
-                                                Intent launchIntent = getPackageManager().getLaunchIntentForPackage(packages[which]);
-                                                if (launchIntent != null) {
-                                                    startActivity(launchIntent);
-                                                } else {
-                                                    // Fallback for settings
-                                                    Intent intent = new Intent(android.provider.Settings.ACTION_SETTINGS);
-                                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                                    startActivity(intent);
-                                                }
-                                            } catch (Exception e) {}
-                                            finish();
-                                        }
-                                    })
-                                    .setCancelable(false)
-                                    .show();
+                                if (!isFinishing()) {
+                                    new AlertDialog.Builder(MainActivity.this)
+                                        .setTitle("Unlocked - Choose App")
+                                        .setItems(launchers, new DialogInterface.OnClickListener() {
+                                            @Override
+                                            public void onClick(DialogInterface dialog, int which) {
+                                                try {
+                                                    Intent launchIntent = getPackageManager().getLaunchIntentForPackage(packages[which]);
+                                                    if (launchIntent != null) {
+                                                        startActivity(launchIntent);
+                                                    } else {
+                                                        // Fallback for settings
+                                                        Intent intent = new Intent(android.provider.Settings.ACTION_SETTINGS);
+                                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                                        startActivity(intent);
+                                                    }
+                                                } catch (Exception e) {}
+                                                finish();
+                                            }
+                                        })
+                                        .setCancelable(false)
+                                        .show();
+                                }
                             } else {
-                                getApplicationContext().getSharedPreferences("MediaCentre", MODE_PRIVATE).edit().putBoolean("unlocked", false).commit();
+                                getApplicationContext().getSharedPreferences("MediaCentre", MODE_PRIVATE)
+                                    .edit().putBoolean("unlocked", false).commit();
                                 allowSettings = false;
                             }
                         } catch (Exception e) {}
@@ -351,8 +490,7 @@ public class MainActivity extends Activity {
     private Runnable blockSettings = new Runnable() {
         @Override
         public void run() {
-            if (isFinishing() || allowSettings) {
-                handler.postDelayed(this, 1000);
+            if (isFinishing() || allowSettings || prefs.getBoolean("unlocked", false)) {
                 return;
             }
             ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
@@ -369,6 +507,7 @@ public class MainActivity extends Activity {
             handler.postDelayed(this, 1000);
         }
     };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -377,6 +516,7 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         prefs = getSharedPreferences("MediaCentre", MODE_PRIVATE);
+        allowSettings = prefs.getBoolean("unlocked", false);
 
         initViews();
         setupConnectionScreen();
@@ -386,13 +526,6 @@ public class MainActivity extends Activity {
         setupAudioControls();
         setupPowerControls();
 
-        handler.post(pollSpotify);
-        handler.post(progressExtrapolator);
-        handler.post(lyricsSyncRunnable);
-        handler.post(pollSystemStats);
-        handler.post(pollUnlock);
-        handler.post(blockSettings);
-
         // Auto-connect
         String lastIp = prefs.getString("last_ip", "");
         if (!lastIp.isEmpty()) {
@@ -401,6 +534,39 @@ public class MainActivity extends Activity {
         
         // Apply theme on startup
         applyTheme(prefs.getString("theme", "dark"));
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        allowSettings = prefs.getBoolean("unlocked", false);
+
+        handler.removeCallbacks(pollSpotify);
+        handler.removeCallbacks(progressExtrapolator);
+        handler.removeCallbacks(lyricsSyncRunnable);
+        handler.removeCallbacks(pollSystemStats);
+        handler.removeCallbacks(pollUnlock);
+        handler.removeCallbacks(blockSettings);
+
+        handler.post(pollSpotify);
+        handler.post(progressExtrapolator);
+        handler.post(lyricsSyncRunnable);
+        handler.post(pollSystemStats);
+        handler.post(pollUnlock);
+        if (!allowSettings) {
+            handler.post(blockSettings);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        handler.removeCallbacks(pollSpotify);
+        handler.removeCallbacks(progressExtrapolator);
+        handler.removeCallbacks(lyricsSyncRunnable);
+        handler.removeCallbacks(pollSystemStats);
+        handler.removeCallbacks(pollUnlock);
+        handler.removeCallbacks(blockSettings);
     }
 
     private void initViews() {
@@ -778,19 +944,19 @@ public class MainActivity extends Activity {
             loadLibrary();
         } else {
             LinearLayout libContainer = (LinearLayout) findViewById(R.id.library_content);
-            if (libContainer != null) libContainer.removeAllViews();
+            if (libContainer != null) clearContainerViews(libContainer);
         }
         
         if (index == 3) {
             loadQueue();
         } else {
             LinearLayout queueContainer = (LinearLayout) findViewById(R.id.queue_content);
-            if (queueContainer != null) queueContainer.removeAllViews();
+            if (queueContainer != null) clearContainerViews(queueContainer);
         }
         
         if (index != 1) {
             LinearLayout searchContainer = (LinearLayout) findViewById(R.id.search_results);
-            if (searchContainer != null) searchContainer.removeAllViews();
+            if (searchContainer != null) clearContainerViews(searchContainer);
         }
         
         if (index == 4) {
@@ -956,7 +1122,7 @@ public class MainActivity extends Activity {
     }
     private void renderSearchResults(String jsonStr) {
         LinearLayout container = (LinearLayout) findViewById(R.id.search_results);
-        container.removeAllViews();
+        clearContainerViews(container);
         try {
             JSONObject json = new JSONObject(jsonStr);
             JSONArray items = json.optJSONArray("items");
@@ -1014,6 +1180,7 @@ public class MainActivity extends Activity {
                     final Runnable fetchImage = new Runnable() {
                         @Override
                         public void run() {
+                            iv.setTag(null);
                             iv.setImageBitmap(null);
                             errLayout.setVisibility(View.GONE);
                             
@@ -1032,27 +1199,31 @@ public class MainActivity extends Activity {
                                     try {
                                         JSONObject j = new JSONObject(response);
                                         final String imgUrl = j.optString("thumbnail_url", "");
-                                        final String highResUrl = j.optString("high_res_url", "");
                                         if (!imgUrl.isEmpty()) {
+                                            iv.setTag(imgUrl);
+                                            Bitmap cached = bitmapCache.get(imgUrl);
+                                            if (cached != null) {
+                                                pb.setVisibility(View.GONE);
+                                                iv.setImageBitmap(cached);
+                                                return;
+                                            }
                                             new AsyncTask<Void, Void, Bitmap>() {
                                                 @Override protected Bitmap doInBackground(Void... voids) {
-                                                    try { return BitmapFactory.decodeStream(new URL(imgUrl).openStream()); } catch (Exception e) { return null; }
+                                                    byte[] data = downloadUrlToBytes(imgUrl);
+                                                    return decodeSampledBitmapFromBytes(data, 100, 100);
                                                 }
                                                 @Override protected void onPostExecute(Bitmap b) {
                                                     pb.setVisibility(View.GONE);
                                                     if (b != null) {
-                                                        iv.setImageBitmap(b);
-                                                        if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
-                                                            new AsyncTask<Void, Void, Bitmap>() {
-                                                                @Override protected Bitmap doInBackground(Void... voids) {
-                                                                    try { return BitmapFactory.decodeStream(new URL(highResUrl).openStream()); } catch (Exception e) { return null; }
-                                                                }
-                                                                @Override protected void onPostExecute(Bitmap hb) {
-                                                                    if (hb != null) iv.setImageBitmap(hb);
-                                                                }
-                                                            }.execute();
+                                                        bitmapCache.put(imgUrl, b);
+                                                        if (imgUrl.equals(iv.getTag())) {
+                                                            iv.setImageBitmap(b);
                                                         }
-                                                    } else showError("Download failed");
+                                                    } else {
+                                                        if (imgUrl.equals(iv.getTag())) {
+                                                            showError("Download failed");
+                                                        }
+                                                    }
                                                 }
                                             }.execute();
                                         } else showError("Download failed");
@@ -1085,12 +1256,16 @@ public class MainActivity extends Activity {
                     tvName.setText(item.optString("name") + " (" + item.optString("type") + ")");
                     tvName.setTextSize(18);
                     tvName.setTypeface(null, android.graphics.Typeface.BOLD);
+                    tvName.setSingleLine(true);
+                    tvName.setEllipsize(TextUtils.TruncateAt.END);
                     textCol.addView(tvName);
 
                     TextView tvArtist = new TextView(MainActivity.this);
                     tvArtist.setText(item.optString("artist", ""));
                     tvArtist.setTextSize(14);
                     tvArtist.setTextColor(0xFF8892b0);
+                    tvArtist.setSingleLine(true);
+                    tvArtist.setEllipsize(TextUtils.TruncateAt.END);
                     textCol.addView(tvArtist);
                     
                     row.addView(textCol);
@@ -1138,7 +1313,6 @@ public class MainActivity extends Activity {
                     row.addView(btns);
                     container.addView(row);
                 }
-                applyTheme(prefs.getString("theme", "dark"));
             }
         } catch (Exception e) {}
     }
@@ -1199,7 +1373,7 @@ public class MainActivity extends Activity {
     private void renderLibraryFolder() {
         if (cachedLibraryItems == null) return;
         LinearLayout container = (LinearLayout) findViewById(R.id.library_content);
-        container.removeAllViews();
+        clearContainerViews(container);
         
         Button likedBtn = new Button(MainActivity.this);
         likedBtn.setText("My Liked Songs");
@@ -1287,6 +1461,7 @@ public class MainActivity extends Activity {
                     final Runnable fetchImage = new Runnable() {
                         @Override
                         public void run() {
+                            img.setTag(null);
                             img.setImageBitmap(null);
                             errLayout.setVisibility(View.GONE);
                             
@@ -1311,27 +1486,31 @@ public class MainActivity extends Activity {
                                     try {
                                         JSONObject j = new JSONObject(response);
                                         final String imgUrl = j.optString("thumbnail_url", "");
-                                        final String highResUrl = j.optString("high_res_url", "");
                                         if (!imgUrl.isEmpty()) {
+                                            img.setTag(imgUrl);
+                                            Bitmap cached = bitmapCache.get(imgUrl);
+                                            if (cached != null) {
+                                                pb.setVisibility(View.GONE);
+                                                img.setImageBitmap(cached);
+                                                return;
+                                            }
                                             new AsyncTask<Void, Void, Bitmap>() {
                                                 @Override protected Bitmap doInBackground(Void... voids) {
-                                                    try { return BitmapFactory.decodeStream(new URL(imgUrl).openStream()); } catch (Exception e) { return null; }
+                                                    byte[] data = downloadUrlToBytes(imgUrl);
+                                                    return decodeSampledBitmapFromBytes(data, 100, 100);
                                                 }
                                                 @Override protected void onPostExecute(Bitmap b) {
                                                     pb.setVisibility(View.GONE);
                                                     if (b != null) {
-                                                        img.setImageBitmap(b);
-                                                        if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
-                                                            new AsyncTask<Void, Void, Bitmap>() {
-                                                                @Override protected Bitmap doInBackground(Void... voids) {
-                                                                    try { return BitmapFactory.decodeStream(new URL(highResUrl).openStream()); } catch (Exception e) { return null; }
-                                                                }
-                                                                @Override protected void onPostExecute(Bitmap hb) {
-                                                                    if (hb != null) img.setImageBitmap(hb);
-                                                                }
-                                                            }.execute();
+                                                        bitmapCache.put(imgUrl, b);
+                                                        if (imgUrl.equals(img.getTag())) {
+                                                            img.setImageBitmap(b);
                                                         }
-                                                    } else showError("Download failed");
+                                                    } else {
+                                                        if (imgUrl.equals(img.getTag())) {
+                                                            showError("Download failed");
+                                                        }
+                                                    }
                                                 }
                                             }.execute();
                                         } else showError("Download failed");
@@ -1374,12 +1553,16 @@ public class MainActivity extends Activity {
                     tvName.setTypeface(null, android.graphics.Typeface.NORMAL);
                 }
                 tvName.setTextSize(18);
+                tvName.setSingleLine(true);
+                tvName.setEllipsize(TextUtils.TruncateAt.END);
                 textCol.addView(tvName);
                 
                 TextView tvArtist = new TextView(MainActivity.this);
                 tvArtist.setText(item.optString("artist", ""));
                 tvArtist.setTextSize(14);
                 tvArtist.setTextColor(0xFF8892b0);
+                tvArtist.setSingleLine(true);
+                tvArtist.setEllipsize(TextUtils.TruncateAt.END);
                 textCol.addView(tvArtist);
                 
                 row.addView(textCol);
@@ -1430,7 +1613,6 @@ public class MainActivity extends Activity {
                 row.addView(btns);
                 container.addView(row);
             }
-            applyTheme(prefs.getString("theme", "dark"));
         } catch (Exception e) {}
     }
 
@@ -1441,7 +1623,7 @@ public class MainActivity extends Activity {
             public void onSuccess(String response) {
                 hideLoading();
                 LinearLayout container = (LinearLayout) findViewById(R.id.queue_content);
-                container.removeAllViews();
+                clearContainerViews(container);
                 try {
                     JSONObject json = new JSONObject(response);
                     JSONArray items = json.optJSONArray("next_tracks");
@@ -1500,6 +1682,7 @@ public class MainActivity extends Activity {
                                 final Runnable fetchImage = new Runnable() {
                                     @Override
                                     public void run() {
+                                        img.setTag(null);
                                         img.setImageBitmap(null);
                                         errLayout.setVisibility(View.GONE);
                                         
@@ -1518,27 +1701,31 @@ public class MainActivity extends Activity {
                                                 try {
                                                     JSONObject j = new JSONObject(response);
                                                     final String imgUrl = j.optString("thumbnail_url", "");
-                                                    final String highResUrl = j.optString("high_res_url", "");
                                                     if (!imgUrl.isEmpty()) {
+                                                        img.setTag(imgUrl);
+                                                        Bitmap cached = bitmapCache.get(imgUrl);
+                                                        if (cached != null) {
+                                                            pb.setVisibility(View.GONE);
+                                                            img.setImageBitmap(cached);
+                                                            return;
+                                                        }
                                                         new AsyncTask<Void, Void, Bitmap>() {
                                                             @Override protected Bitmap doInBackground(Void... voids) {
-                                                                try { return BitmapFactory.decodeStream(new URL(imgUrl).openStream()); } catch (Exception e) { return null; }
+                                                                byte[] data = downloadUrlToBytes(imgUrl);
+                                                                return decodeSampledBitmapFromBytes(data, 100, 100);
                                                             }
                                                             @Override protected void onPostExecute(Bitmap b) {
                                                                 pb.setVisibility(View.GONE);
                                                                 if (b != null) {
-                                                                    img.setImageBitmap(b);
-                                                                    if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
-                                                                        new AsyncTask<Void, Void, Bitmap>() {
-                                                                            @Override protected Bitmap doInBackground(Void... voids) {
-                                                                                try { return BitmapFactory.decodeStream(new URL(highResUrl).openStream()); } catch (Exception e) { return null; }
-                                                                            }
-                                                                            @Override protected void onPostExecute(Bitmap hb) {
-                                                                                if (hb != null) img.setImageBitmap(hb);
-                                                                            }
-                                                                        }.execute();
+                                                                    bitmapCache.put(imgUrl, b);
+                                                                    if (imgUrl.equals(img.getTag())) {
+                                                                        img.setImageBitmap(b);
                                                                     }
-                                                                } else showError("Download failed");
+                                                                } else {
+                                                                    if (imgUrl.equals(img.getTag())) {
+                                                                        showError("Download failed");
+                                                                    }
+                                                                }
                                                             }
                                                         }.execute();
                                                     } else showError("Download failed");
@@ -1575,6 +1762,8 @@ public class MainActivity extends Activity {
                             tv.setText(artist.isEmpty() ? name : name + " - " + artist);
                             tv.setTextColor(0xFFffffff);
                             tv.setTextSize(16);
+                            tv.setSingleLine(true);
+                            tv.setEllipsize(TextUtils.TruncateAt.END);
                             tv.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
                             row.addView(tv);
                             
@@ -1609,7 +1798,6 @@ public class MainActivity extends Activity {
                     err.setTextColor(0xFF8892b0);
                     container.addView(err);
                 }
-                applyTheme(prefs.getString("theme", "dark"));
             }
             @Override public void onError(String error) { hideLoading(); showToast("Queue load failed", false); }
         });
@@ -1709,6 +1897,17 @@ public class MainActivity extends Activity {
     }
     
     private void applyThemeToView(View v, int bgP, int bgS, int textP, int textS, boolean isNative) {
+        if (v == null) return;
+        
+        int id = v.getId();
+        if (id == R.id.lyrics_content || id == R.id.library_content || id == R.id.search_results || id == R.id.queue_content) {
+            return;
+        }
+
+        if (v instanceof ToggleButton) {
+            return;
+        }
+        
         if (v instanceof ViewGroup) {
             ViewGroup vg = (ViewGroup) v;
             for (int i = 0; i < vg.getChildCount(); i++) {
@@ -1750,6 +1949,7 @@ public class MainActivity extends Activity {
                 android.graphics.drawable.ColorDrawable pressed = new android.graphics.drawable.ColorDrawable(android.graphics.Color.GRAY);
                 android.graphics.drawable.ColorDrawable normal = new android.graphics.drawable.ColorDrawable(defaultColor);
                 sld.addState(new int[]{android.R.attr.state_pressed}, pressed);
+                sld.addState(new int[]{android.R.attr.state_enabled}, normal);
                 sld.addState(new int[]{}, normal);
                 int pL = 20;
                 int pT = 10;
@@ -1763,6 +1963,8 @@ public class MainActivity extends Activity {
                 
                 android.util.Log.d("MEDIACENTRE_THEME", "Set padding " + pL + " for btn id: " + b.getId());
                 b.setBackgroundDrawable(sld);
+                // Fix for legacy Android StateListDrawable initialization
+                sld.setState(new int[]{android.R.attr.state_enabled});
                 b.setPadding(pL, pT, pR, pB);
             }
         } else if (v instanceof EditText) {
@@ -1906,6 +2108,7 @@ public class MainActivity extends Activity {
         final TextView npArtErrorText = (TextView) findViewById(R.id.np_art_error_text);
         final Button npArtRetryBtn = (Button) findViewById(R.id.np_art_retry_btn);
 
+        npArtwork.setTag(null);
         npArtwork.setImageBitmap(null);
         if (npArtProgress != null) {
             npArtProgress.setVisibility(View.VISIBLE);
@@ -1937,29 +2140,31 @@ public class MainActivity extends Activity {
                     final String imgUrl = json.optString("thumbnail_url", "");
                     final String highResUrl = json.optString("high_res_url", "");
                     if (!imgUrl.isEmpty()) {
+                        npArtwork.setTag(imgUrl);
+                        Bitmap cached = bitmapCache.get(imgUrl);
+                        if (cached != null) {
+                            if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
+                            npArtwork.setImageBitmap(cached);
+                            loadHighResIfNeeded(highResUrl, imgUrl);
+                            return;
+                        }
                         new AsyncTask<Void, Void, Bitmap>() {
                             @Override protected Bitmap doInBackground(Void... voids) {
-                                try {
-                                    InputStream in = new URL(imgUrl).openStream();
-                                    return BitmapFactory.decodeStream(in);
-                                } catch (Exception e) { return null; }
+                                byte[] data = downloadUrlToBytes(imgUrl);
+                                return decodeSampledBitmapFromBytes(data, 500, 500);
                             }
                             @Override protected void onPostExecute(Bitmap b) {
                                 if (b != null) {
-                                    if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
-                                    npArtwork.setImageBitmap(b);
-                                    if (!highResUrl.isEmpty() && !highResUrl.equals(imgUrl)) {
-                                        new AsyncTask<Void, Void, Bitmap>() {
-                                            @Override protected Bitmap doInBackground(Void... voids) {
-                                                try { return BitmapFactory.decodeStream(new URL(highResUrl).openStream()); } catch (Exception e) { return null; }
-                                            }
-                                            @Override protected void onPostExecute(Bitmap hb) {
-                                                if (hb != null) npArtwork.setImageBitmap(hb);
-                                            }
-                                        }.execute();
+                                    bitmapCache.put(imgUrl, b);
+                                    if (imgUrl.equals(npArtwork.getTag())) {
+                                        if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
+                                        npArtwork.setImageBitmap(b);
+                                        loadHighResIfNeeded(highResUrl, imgUrl);
                                     }
                                 } else {
-                                    showErrorState("Failed to download");
+                                    if (imgUrl.equals(npArtwork.getTag())) {
+                                        showErrorState("Failed to download");
+                                    }
                                 }
                             }
                         }.execute();
@@ -1970,6 +2175,31 @@ public class MainActivity extends Activity {
             }
             @Override public void onError(String error) { showErrorState("Failed to download"); }
             
+            private void loadHighResIfNeeded(final String highResUrl, final String currentImgUrl) {
+                if (highResUrl != null && !highResUrl.isEmpty() && !highResUrl.equals(currentImgUrl)) {
+                    npArtwork.setTag(highResUrl);
+                    Bitmap highResCached = bitmapCache.get(highResUrl);
+                    if (highResCached != null) {
+                        npArtwork.setImageBitmap(highResCached);
+                        return;
+                    }
+                    new AsyncTask<Void, Void, Bitmap>() {
+                        @Override protected Bitmap doInBackground(Void... voids) {
+                            byte[] data = downloadUrlToBytes(highResUrl);
+                            return decodeSampledBitmapFromBytes(data, 500, 500);
+                        }
+                        @Override protected void onPostExecute(Bitmap hb) {
+                            if (hb != null) {
+                                bitmapCache.put(highResUrl, hb);
+                                if (highResUrl.equals(npArtwork.getTag())) {
+                                    npArtwork.setImageBitmap(hb);
+                                }
+                            }
+                        }
+                    }.execute();
+                }
+            }
+
             private void showErrorState(String errorMsg) {
                 if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
                 npArtwork.setImageResource(R.drawable.ic_error);
@@ -2038,14 +2268,23 @@ public class MainActivity extends Activity {
     }
 
     private void fetchLyrics(final String track, final String artist) {
-        if (track.isEmpty() || artist.isEmpty() || (track.equals(currentLyricsTrack) && currentLyrics.size() > 0)) {
+        if (track.isEmpty() || artist.isEmpty() || track.equals("Advertisement")) {
+            currentLyricsTrack = "";
+            currentLyrics.clear();
+            currentLyricLineIndex = -1;
+            if (lyricsContent != null) {
+                clearContainerViews(lyricsContent);
+            }
+            return;
+        }
+        if (track.equals(currentLyricsTrack) && currentLyrics.size() > 0) {
             return;
         }
         currentLyricsTrack = track;
         currentLyrics.clear();
         currentLyricLineIndex = -1;
         if (lyricsContent != null) {
-            lyricsContent.removeAllViews();
+            clearContainerViews(lyricsContent);
         }
         showLoading("Loading Lyrics...");
 
@@ -2062,7 +2301,7 @@ public class MainActivity extends Activity {
                             @Override
                             public void run() {
                                 if (lyricsContent != null) {
-                                    lyricsContent.removeAllViews();
+                                    clearContainerViews(lyricsContent);
                                     TextView error = new TextView(MainActivity.this);
                                     error.setText(errMsg);
                                     error.setTextColor(0xFF8892b0);
@@ -2098,7 +2337,7 @@ public class MainActivity extends Activity {
                                 @Override
                                 public void run() {
                                     if (lyricsContent != null) {
-                                        lyricsContent.removeAllViews();
+                                        clearContainerViews(lyricsContent);
                                         TextView error = new TextView(MainActivity.this);
                                         error.setText("No lyrics found.");
                                         error.setTextColor(0xFF8892b0);
@@ -2122,7 +2361,7 @@ public class MainActivity extends Activity {
                     @Override
                     public void run() {
                         if (lyricsContent != null) {
-                            lyricsContent.removeAllViews();
+                            clearContainerViews(lyricsContent);
                             TextView errView = new TextView(MainActivity.this);
                             String errMsg = "Error loading lyrics";
                             if (error != null && !error.isEmpty()) {
@@ -2180,13 +2419,14 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 if (lyricsContent != null) {
-                    lyricsContent.removeAllViews();
+                    clearContainerViews(lyricsContent);
                     for (int i = 0; i < currentLyrics.size(); i++) {
                         LyricLine ll = currentLyrics.get(i);
                         TextView tv = new TextView(MainActivity.this);
                         tv.setText(ll.text.isEmpty() ? "♪" : ll.text);
                         tv.setTextColor(0xFF8892b0); // Dim
                         tv.setTextSize(22);
+                        tv.setTypeface(null, Typeface.NORMAL);
                         tv.setPadding(0, 20, 0, 20);
                         tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
                         tv.setLayoutParams(new LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -2223,26 +2463,29 @@ public class MainActivity extends Activity {
             }
         }
         if (newIndex != currentLyricLineIndex) {
-            for (int i = 0; i < currentLyrics.size(); i++) {
-                LyricLine line = currentLyrics.get(i);
-                if (line.view != null) {
-                    if (i == newIndex) {
-                        line.view.setTextColor(0xFF00d4ff);
-                        line.view.setTextSize(26);
-                    } else {
-                        line.view.setTextColor(0xFF8892b0);
-                        line.view.setTextSize(22);
+            // Un-highlight previous active line (if valid)
+            if (currentLyricLineIndex >= 0 && currentLyricLineIndex < currentLyrics.size()) {
+                LyricLine oldLine = currentLyrics.get(currentLyricLineIndex);
+                if (oldLine != null && oldLine.view != null) {
+                    oldLine.view.setTextColor(0xFF8892b0);
+                    oldLine.view.setTypeface(null, Typeface.NORMAL);
+                }
+            }
+            
+            // Highlight new active line (if valid)
+            if (newIndex >= 0 && newIndex < currentLyrics.size()) {
+                LyricLine newLine = currentLyrics.get(newIndex);
+                if (newLine != null && newLine.view != null) {
+                    newLine.view.setTextColor(0xFF00d4ff);
+                    newLine.view.setTypeface(null, Typeface.BOLD);
+                    if (musicLyrics.getHeight() > 0) {
+                        int scrollY = newLine.view.getTop() - (musicLyrics.getHeight() / 2) + (newLine.view.getHeight() / 2);
+                        musicLyrics.smoothScrollTo(0, Math.max(0, scrollY));
                     }
                 }
             }
+            
             currentLyricLineIndex = newIndex;
-            if (currentLyricLineIndex >= 0 && currentLyricLineIndex < currentLyrics.size()) {
-                LyricLine newLine = currentLyrics.get(currentLyricLineIndex);
-                if (newLine.view != null && musicLyrics.getHeight() > 0) {
-                    int scrollY = newLine.view.getTop() - (musicLyrics.getHeight() / 2) + (newLine.view.getHeight() / 2);
-                    musicLyrics.smoothScrollTo(0, Math.max(0, scrollY));
-                }
-            }
         }
     }
 
@@ -2250,5 +2493,8 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacksAndMessages(null);
+        if (bitmapCache != null) {
+            bitmapCache.clear();
+        }
     }
 }

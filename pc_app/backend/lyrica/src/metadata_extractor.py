@@ -2,7 +2,7 @@ import requests
 import logging
 from typing import Optional, Dict
 from functools import lru_cache
-from datetime import datetime
+from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -19,7 +19,6 @@ ITUNES_API = "https://itunes.apple.com/search"
 
 _mb_lock = threading.Lock()
 _mb_last_call = 0.0
-ITUNES_API = "https://itunes.apple.com/search"
 
 def get_musicbrainz_metadata(artist: str, song: str) -> Optional[Dict]:
     """
@@ -462,14 +461,14 @@ def get_metadata_only(artist: str, song: str) -> Dict:
                 "status": "success",
                 "metadata": formatted,
                 "sources": metadata_result["sources"],
-                "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             }
         else:
             return {
                 "status": "error",
                 "error": metadata_result.get("error", "Metadata fetch failed"),
                 "sources": [],
-                "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             }
     except Exception as e:
         logger.error(f"Get metadata only error: {str(e)}")
@@ -477,5 +476,5 @@ def get_metadata_only(artist: str, song: str) -> Dict:
             "status": "error",
             "error": str(e),
             "sources": [],
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         }

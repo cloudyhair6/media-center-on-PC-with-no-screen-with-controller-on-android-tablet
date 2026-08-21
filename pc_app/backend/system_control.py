@@ -406,50 +406,19 @@ class SystemControl:
 
     @staticmethod
     def get_system_stats() -> dict:
-        """Get CPU, RAM, Disk, and GPU usage via native Windows tools (PowerShell fallback)."""
-        import time
+        """Get CPU, RAM, Disk, and GPU usage via psutil."""
         from datetime import datetime
         try:
-            # Get CPU load percentage
-            cpu_cmd = subprocess.run(["powershell", "-Command", "Get-CimInstance Win32_Processor | Select-Object -ExpandProperty LoadPercentage"], capture_output=True, text=True, timeout=3, creationflags=0x08000000)
-            cpu = 0
-            for line in cpu_cmd.stdout.split():
-                if line.strip().isdigit():
-                    cpu = int(line.strip())
-                    break
-            
-            # Get RAM usage
-            mem_cmd = subprocess.run(["powershell", "-Command", "Get-CimInstance Win32_OperatingSystem | Select-Object -Property FreePhysicalMemory,TotalVisibleMemorySize | ConvertTo-Json"], capture_output=True, text=True, timeout=3, creationflags=0x08000000)
-            mem = 0
-            import json
-            data = json.loads(mem_cmd.stdout)
-            free_mem = data.get("FreePhysicalMemory", 0)
-            total_mem = data.get("TotalVisibleMemorySize", 1)
-            mem = int(((total_mem - free_mem) / total_mem) * 100) if total_mem > 0 else 0
-            
-            # Get Disk RW Usage
-            disk_cmd = subprocess.run(["powershell", "-Command", r"((Get-Counter '\PhysicalDisk(_Total)\% Disk Time').CounterSamples | Measure-Object -Property CookedValue -Average).Average"], capture_output=True, text=True, timeout=3, creationflags=0x08000000)
-            disk = 0
-            try:
-                if disk_cmd.stdout.strip():
-                    disk = int(float(disk_cmd.stdout.strip().replace(',', '.')))
-            except Exception:
-                pass
-                
-            # Get GPU Usage
-            gpu_cmd = subprocess.run(["powershell", "-Command", r"((Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples | Measure-Object -Property CookedValue -Sum).Sum"], capture_output=True, text=True, timeout=3, creationflags=0x08000000)
+            import psutil
+            cpu = int(psutil.cpu_percent())
+            mem = int(psutil.virtual_memory().percent)
+            disk = int(psutil.disk_usage('C:\\').percent)
             gpu = 0
-            try:
-                if gpu_cmd.stdout.strip():
-                    gpu = int(float(gpu_cmd.stdout.strip().replace(',', '.')))
-            except Exception:
-                pass
-
             last_updated = datetime.now().strftime("%H:%M:%S")
             return {"cpu": cpu, "ram": mem, "disk": disk, "gpu": gpu, "last_updated": last_updated}
         except Exception as e:
             print(f"Stats Error: {e}")
-            return {"cpu": 0, "ram": 0}
+            return {"cpu": 0, "ram": 0, "disk": 0, "gpu": 0}
 
 
 

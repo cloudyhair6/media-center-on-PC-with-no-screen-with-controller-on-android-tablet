@@ -438,7 +438,7 @@ class SettingsScreen(QWidget):
     def _on_window_mode_changed(self, mode: str) -> None:
         self._cfg["window_mode"] = mode
         try:
-            Config.save()
+            self._cfg.save()
         except OSError:
             pass
         self.setting_changed.emit("window_mode", mode)
