@@ -44,7 +44,7 @@
                 android:layout_weight="1"
                 android:text="+ Add New PC"
                 android:textColor="#00d4ff"
-                android:background="#1a1f36"
+                android:background="@drawable/btn_dark"
                 android:padding="15dp"
                 android:layout_marginRight="5dp" />
             <Button android:id="@+id/btn_remove_pc"
@@ -53,7 +53,7 @@
                 android:layout_weight="1"
                 android:text="- Remove PC"
                 android:textColor="#ff3333"
-                android:background="#1a1f36"
+                android:background="@drawable/btn_dark"
                 android:padding="15dp"
                 android:layout_marginLeft="5dp" />
         </LinearLayout>
@@ -81,9 +81,28 @@
                 android:layout_height="wrap_content"
                 android:text="Disconnect"
                 android:textColor="#ff5252"
-                android:background="#1a1f36"
+                android:background="@drawable/btn_dark"
                 android:paddingLeft="15dp"
                 android:paddingRight="15dp" />
+            <LinearLayout android:id="@+id/connection_status_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginLeft="12dp">
+                <View android:id="@+id/connection_status_dot"
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:background="@drawable/dot_offline"
+                    android:layout_marginRight="6dp" />
+                <TextView android:id="@+id/connection_status_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Offline"
+                    android:textColor="#ff5252"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
             <TextView android:id="@+id/tab_title"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -97,6 +116,8 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Refresh"
+                android:background="@drawable/btn_dark"
+                android:textColor="@color/btn_dark_text"
                 android:paddingLeft="15dp"
                 android:paddingRight="15dp" />
         </LinearLayout>
@@ -141,108 +162,129 @@
                         android:textSize="13sp" android:singleLine="true" android:padding="8dp" />
                 </LinearLayout>
                 
-                <!-- Now Playing -->
-                <ScrollView android:id="@+id/music_now_playing"
-                    android:layout_width="fill_parent" android:layout_height="fill_parent">
-                    <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content"
-                        android:orientation="vertical" android:gravity="center" android:padding="10dp">
-                        <TextView android:id="@+id/np_context"
-                            android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:textColor="#8892b0" android:textSize="14sp" android:layout_marginBottom="4dp"
-                            android:visibility="gone" />
-                        <RelativeLayout android:layout_width="135dp" android:layout_height="135dp" android:layout_marginBottom="8dp">
-                            <ImageView android:id="@+id/np_artwork"
-                                android:layout_width="fill_parent" android:layout_height="fill_parent" />
-                            <ProgressBar android:id="@+id/np_art_progress"
-                                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:layout_centerInParent="true" android:visibility="gone" />
-                            <LinearLayout android:id="@+id/np_art_error_layout"
-                                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:layout_centerInParent="true" android:orientation="vertical"
-                                android:gravity="center" android:visibility="gone">
-                                <TextView android:id="@+id/np_art_error_text"
-                                    android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                    android:text="Failed to download" android:textColor="#ffffff" android:textSize="12sp"
-                                    android:gravity="center" android:layout_marginBottom="10dp" />
-                                <Button android:id="@+id/np_art_retry_btn"
-                                    android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                    android:text="Retry" android:textSize="12sp" android:padding="5dp"
-                                    android:textColor="#ffffff" android:background="#44ffffff" />
-                            </LinearLayout>
-                        </RelativeLayout>
-                        <TextView android:id="@+id/np_title"
-                            android:layout_width="fill_parent" android:layout_height="wrap_content"
-                            android:text="Not Playing" android:textColor="#ffffff" android:textSize="20sp"
-                            android:textStyle="bold" android:gravity="center" android:layout_marginBottom="2dp"
-                            android:singleLine="true" android:ellipsize="end" />
-                        <TextView android:id="@+id/np_artist"
-                            android:layout_width="fill_parent" android:layout_height="wrap_content"
-                            android:text="" android:textColor="#8892b0" android:textSize="15sp"
-                            android:gravity="center" android:layout_marginBottom="2dp"
-                            android:singleLine="true" android:ellipsize="end" />
-                        <TextView android:id="@+id/np_album"
-                            android:layout_width="fill_parent" android:layout_height="wrap_content"
-                            android:text="" android:textColor="#8892b0" android:textSize="13sp"
-                            android:gravity="center" android:layout_marginBottom="6dp"
-                            android:singleLine="true" android:ellipsize="end" />
-                            
-                        <!-- Progress Bar -->
+                <!-- Now Playing Container with Loading Overlay -->
+                <FrameLayout android:id="@+id/music_now_playing_container"
+                    android:layout_width="fill_parent"
+                    android:layout_height="fill_parent">
+                    <ScrollView android:id="@+id/music_now_playing"
+                        android:layout_width="fill_parent" android:layout_height="fill_parent">
                         <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content"
-                            android:orientation="horizontal" android:gravity="center_vertical"
-                            android:layout_marginBottom="6dp" android:paddingLeft="10dp" android:paddingRight="10dp">
-                            <Button android:id="@+id/btn_seek_back" android:layout_width="55dp" android:layout_height="35dp"
-                                android:text="-15s" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="8dp"/>
-                            <TextView android:id="@+id/np_time_current" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:text="00:00" android:textColor="#8892b0" android:textSize="12sp" android:layout_marginRight="8dp"/>
-                            <SeekBar android:id="@+id/np_progress" android:layout_width="0dp" android:layout_height="wrap_content"
-                                android:layout_weight="1" android:max="100" android:progressDrawable="@drawable/custom_progress"/>
-                            <TextView android:id="@+id/np_time_total" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:text="00:00" android:textColor="#8892b0" android:textSize="12sp" android:layout_marginLeft="8dp" android:layout_marginRight="8dp"/>
-                            <Button android:id="@+id/btn_seek_fwd" android:layout_width="55dp" android:layout_height="35dp"
-                                android:text="+15s" android:textColor="#ffffff" android:background="#1a1f36"/>
-                        </LinearLayout>
-                            
-                        <!-- Playback Controls -->
-                        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:orientation="horizontal" android:layout_marginBottom="6dp" android:gravity="center">
-                            <Button android:id="@+id/btn_prev" android:layout_width="60dp" android:layout_height="wrap_content"
-                                android:text="&lt;&lt;" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="10dp"/>
-                            <Button android:id="@+id/btn_play_pause" android:layout_width="100dp" android:layout_height="wrap_content"
-                                android:text="Play/Pause" android:textColor="#ffffff" android:background="#00d4ff" android:layout_marginRight="10dp"/>
-                            <Button android:id="@+id/btn_next" android:layout_width="60dp" android:layout_height="wrap_content"
-                                android:text="&gt;&gt;" android:textColor="#ffffff" android:background="#1a1f36" />
-                        </LinearLayout>
+                            android:orientation="vertical" android:gravity="center" android:padding="10dp">
+                            <TextView android:id="@+id/np_context"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:textColor="#8892b0" android:textSize="14sp" android:layout_marginBottom="4dp"
+                                android:visibility="gone" />
+                            <RelativeLayout android:layout_width="135dp" android:layout_height="135dp" android:layout_marginBottom="8dp">
+                                <ImageView android:id="@+id/np_artwork"
+                                    android:layout_width="fill_parent" android:layout_height="fill_parent" />
+                                <ProgressBar android:id="@+id/np_art_progress"
+                                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:layout_centerInParent="true" android:visibility="gone" />
+                                <LinearLayout android:id="@+id/np_art_error_layout"
+                                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:layout_centerInParent="true" android:orientation="vertical"
+                                    android:gravity="center" android:visibility="gone">
+                                    <TextView android:id="@+id/np_art_error_text"
+                                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                        android:text="Failed to download" android:textColor="#ffffff" android:textSize="12sp"
+                                        android:gravity="center" android:layout_marginBottom="10dp" />
+                                    <Button android:id="@+id/np_art_retry_btn"
+                                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                        android:text="Retry" android:textSize="12sp" android:padding="5dp"
+                                        android:textColor="#ffffff" android:background="#44ffffff" />
+                                </LinearLayout>
+                            </RelativeLayout>
+                            <TextView android:id="@+id/np_title"
+                                android:layout_width="fill_parent" android:layout_height="wrap_content"
+                                android:text="Not Playing" android:textColor="#ffffff" android:textSize="20sp"
+                                android:textStyle="bold" android:gravity="center" android:layout_marginBottom="2dp"
+                                android:singleLine="true" android:ellipsize="end" />
+                            <TextView android:id="@+id/np_artist"
+                                android:layout_width="fill_parent" android:layout_height="wrap_content"
+                                android:text="" android:textColor="#8892b0" android:textSize="15sp"
+                                android:gravity="center" android:layout_marginBottom="2dp"
+                                android:singleLine="true" android:ellipsize="end" />
+                            <TextView android:id="@+id/np_album"
+                                android:layout_width="fill_parent" android:layout_height="wrap_content"
+                                android:text="" android:textColor="#8892b0" android:textSize="13sp"
+                                android:gravity="center" android:layout_marginBottom="6dp"
+                                android:singleLine="true" android:ellipsize="end" />
+                                
+                            <!-- Progress Bar -->
+                            <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content"
+                                android:orientation="horizontal" android:gravity="center_vertical"
+                                android:layout_marginBottom="6dp" android:paddingLeft="10dp" android:paddingRight="10dp">
+                                <Button android:id="@+id/btn_seek_back" android:layout_width="55dp" android:layout_height="35dp"
+                                    android:text="-15s" android:textColor="#ffffff" android:background="@drawable/btn_dark" android:layout_marginRight="8dp"/>
+                                <TextView android:id="@+id/np_time_current" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:text="00:00" android:textColor="#8892b0" android:textSize="12sp" android:layout_marginRight="8dp"/>
+                                <SeekBar android:id="@+id/np_progress" android:layout_width="0dp" android:layout_height="wrap_content"
+                                    android:layout_weight="1" android:max="100" android:progressDrawable="@drawable/custom_progress"/>
+                                <TextView android:id="@+id/np_time_total" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:text="00:00" android:textColor="#8892b0" android:textSize="12sp" android:layout_marginLeft="8dp" android:layout_marginRight="8dp"/>
+                                <Button android:id="@+id/btn_seek_fwd" android:layout_width="55dp" android:layout_height="35dp"
+                                    android:text="+15s" android:textColor="#ffffff" android:background="@drawable/btn_dark"/>
+                            </LinearLayout>
+                                
+                            <!-- Playback Controls -->
+                            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:orientation="horizontal" android:layout_marginBottom="6dp" android:gravity="center">
+                                <Button android:id="@+id/btn_prev" android:layout_width="60dp" android:layout_height="wrap_content"
+                                    android:text="&lt;&lt;" android:textColor="#ffffff" android:background="@drawable/btn_dark" android:layout_marginRight="10dp"/>
+                                <Button android:id="@+id/btn_play_pause" android:layout_width="100dp" android:layout_height="wrap_content"
+                                    android:text="Play/Pause" android:textColor="#ffffff" android:background="#00d4ff" android:layout_marginRight="10dp"/>
+                                <Button android:id="@+id/btn_next" android:layout_width="60dp" android:layout_height="wrap_content"
+                                    android:text="&gt;&gt;" android:textColor="#ffffff" android:background="@drawable/btn_dark" />
+                            </LinearLayout>
 
-                        <!-- Extra Actions -->
-                        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:orientation="horizontal" android:layout_marginBottom="6dp" android:gravity="center">
-                            <Button android:id="@+id/btn_np_like" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:text="Like" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="10dp"/>
-                            <Button android:id="@+id/btn_np_playlist" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:text="Add to Playlist" android:textColor="#ffffff" android:background="#1a1f36" />
+                            <!-- Extra Actions -->
+                            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:orientation="horizontal" android:layout_marginBottom="6dp" android:gravity="center">
+                                <Button android:id="@+id/btn_np_like" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:text="Like" android:textColor="#ffffff" android:background="@drawable/btn_dark" android:layout_marginRight="10dp"/>
+                                <Button android:id="@+id/btn_np_playlist" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:text="Add to Playlist" android:textColor="#ffffff" android:background="@drawable/btn_dark" />
+                            </LinearLayout>
+                            
+                            <!-- Volume -->
+                            <LinearLayout android:layout_width="350dp" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="6dp">
+                                <Button android:id="@+id/btn_vol_down" android:layout_width="50dp" android:layout_height="wrap_content"
+                                    android:text="-5%" android:textColor="#ffffff" android:background="@drawable/btn_dark" android:layout_marginRight="5dp"/>
+                                <TextView android:id="@+id/vol_label" android:layout_width="40dp" android:layout_height="wrap_content"
+                                    android:text="50%" android:textColor="#ffffff" android:gravity="center" />
+                                <SeekBar android:id="@+id/seekBar_volume" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="100" android:progress="50" android:padding="10dp" android:progressDrawable="@drawable/custom_progress"/>
+                                <Button android:id="@+id/btn_vol_up" android:layout_width="50dp" android:layout_height="wrap_content"
+                                    android:text="+5%" android:textColor="#ffffff" android:background="@drawable/btn_dark" android:layout_marginLeft="5dp"/>
+                            </LinearLayout>
+                            
+                            <!-- Shuffle/Repeat -->
+                            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:orientation="horizontal">
+                                <Button android:id="@+id/btn_shuffle" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:text="Shuffle" android:textColor="#ffffff" android:background="@drawable/btn_dark" android:layout_marginRight="10dp"/>
+                                <Button android:id="@+id/btn_repeat" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:text="Repeat" android:textColor="#ffffff" android:background="@drawable/btn_dark" />
+                            </LinearLayout>
                         </LinearLayout>
-                        
-                        <!-- Volume -->
-                        <LinearLayout android:layout_width="350dp" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="6dp">
-                            <Button android:id="@+id/btn_vol_down" android:layout_width="50dp" android:layout_height="wrap_content"
-                                android:text="-5%" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="5dp"/>
-                            <TextView android:id="@+id/vol_label" android:layout_width="40dp" android:layout_height="wrap_content"
-                                android:text="50%" android:textColor="#ffffff" android:gravity="center" />
-                            <SeekBar android:id="@+id/seekBar_volume" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="100" android:progress="50" android:padding="10dp" android:progressDrawable="@drawable/custom_progress"/>
-                            <Button android:id="@+id/btn_vol_up" android:layout_width="50dp" android:layout_height="wrap_content"
-                                android:text="+5%" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginLeft="5dp"/>
-                        </LinearLayout>
-                        
-                        <!-- Shuffle/Repeat -->
-                        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:orientation="horizontal">
-                            <Button android:id="@+id/btn_shuffle" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:text="Shuffle" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginRight="10dp"/>
-                            <Button android:id="@+id/btn_repeat" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                                android:text="Repeat" android:textColor="#ffffff" android:background="#1a1f36" />
-                        </LinearLayout>
+                    </ScrollView>
+                    <LinearLayout android:id="@+id/np_loading_overlay"
+                        android:layout_width="fill_parent"
+                        android:layout_height="fill_parent"
+                        android:background="#CC0a0e1a"
+                        android:gravity="center"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+                        <ProgressBar android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="12dp" />
+                        <TextView android:id="@+id/np_loading_text"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Loading Now Playing..."
+                            android:textColor="#8892b0"
+                            android:textSize="18sp" />
                     </LinearLayout>
-                </ScrollView>
+                </FrameLayout>
                 
                 <!-- Search -->
                 <LinearLayout android:id="@+id/music_search"
@@ -258,7 +300,7 @@
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="▼" android:textColor="#8892b0" android:textSize="14sp" android:layout_gravity="center_vertical|right" android:paddingRight="10dp" android:clickable="false" android:focusable="false" />
                         </FrameLayout>
                         <Button android:id="@+id/btn_search" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="Search" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginLeft="5dp" />
+                            android:text="Search" android:textColor="#ffffff" android:background="@drawable/btn_dark" android:layout_marginLeft="5dp" />
                     </LinearLayout>
                     <ScrollView android:layout_width="fill_parent" android:layout_height="fill_parent" android:layout_marginTop="10dp">
                         <LinearLayout android:id="@+id/search_results" android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="vertical" />
@@ -300,13 +342,19 @@
                     <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="10dp" android:gravity="center_vertical">
                         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
                             android:text="Show Album Art" android:textColor="#ffffff" android:textSize="18sp"/>
-                        <ToggleButton android:id="@+id/toggle_album_art" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                        <ToggleButton android:id="@+id/toggle_album_art" android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/btn_toggle_dark" android:textColor="@color/toggle_dark_text" />
+                    </LinearLayout>
+                    
+                    <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="10dp" android:gravity="center_vertical">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Pixel-Perfect Album Art" android:textColor="#ffffff" android:textSize="18sp"/>
+                        <ToggleButton android:id="@+id/toggle_pixel_perfect_art" android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/btn_toggle_dark" android:textColor="@color/toggle_dark_text" />
                     </LinearLayout>
                     
                     <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="20dp" android:gravity="center_vertical">
                         <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
                             android:text="Theme" android:textColor="#ffffff" android:textSize="18sp"/>
-                        <Button android:id="@+id/btn_theme" android:layout_width="100dp" android:layout_height="wrap_content" android:text="Dark" />
+                        <Button android:id="@+id/btn_theme" android:layout_width="100dp" android:layout_height="wrap_content" android:text="Dark" android:background="@drawable/btn_dark" android:textColor="@color/btn_dark_text" />
                     </LinearLayout>
                     
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -334,11 +382,11 @@
                     <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="10dp" android:gravity="center_vertical">
                         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
                             android:text="Speaker Fill (5.1)" android:textColor="#ffffff" android:textSize="18sp"/>
-                        <ToggleButton android:id="@+id/toggle_speaker_fill" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                        <ToggleButton android:id="@+id/toggle_speaker_fill" android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/btn_toggle_dark" android:textColor="@color/toggle_dark_text" />
                     </LinearLayout>
                     
                     <Button android:id="@+id/btn_speaker_config" android:layout_width="fill_parent" android:layout_height="wrap_content"
-                        android:text="Open Speaker Config on PC" android:textColor="#ffffff" android:background="#1a1f36" android:layout_marginBottom="10dp" />
+                        android:text="Open Speaker Config on PC" android:textColor="#ffffff" android:background="@drawable/btn_dark" android:layout_marginBottom="10dp" />
                 </LinearLayout>
             </ScrollView>
             
@@ -357,7 +405,7 @@
                     android:text="Restart PC" android:textColor="#ffffff" android:background="#ffa726" android:textSize="18sp" android:layout_marginBottom="20dp"/>
                     
                 <Button android:id="@+id/btn_close_app" android:layout_width="250dp" android:layout_height="70dp"
-                    android:text="Close PC App" android:textColor="#ffffff" android:background="#1a1f36" android:textSize="18sp"/>
+                    android:text="Close PC App" android:textColor="#ffffff" android:background="@drawable/btn_dark" android:textSize="18sp"/>
             </LinearLayout>
             
         </FrameLayout>

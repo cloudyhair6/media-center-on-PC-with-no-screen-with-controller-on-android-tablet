@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base Application Theme for Android 2.3 (API 10 Gingerbread) -->
+    <style name="AppTheme" parent="@android:style/Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@color/bg_primary</item>
+        <item name="android:colorBackground">@color/bg_primary</item>
+        <item name="android:buttonStyle">@style/Widget.Button.Dark</item>
+        <item name="android:buttonStyleToggle">@style/Widget.Button.Toggle.Dark</item>
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <!-- Custom Dark Button Style -->
+    <style name="Widget.Button.Dark" parent="@android:style/Widget.Button">
+        <item name="android:background">@drawable/btn_dark</item>
+        <item name="android:textColor">@color/btn_dark_text</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:minHeight">36dp</item>
+        <item name="android:minWidth">64dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+    </style>
+
+    <!-- Custom Dark Toggle Button Style -->
+    <style name="Widget.Button.Toggle.Dark" parent="@android:style/Widget.Button.Toggle">
+        <item name="android:background">@drawable/btn_toggle_dark</item>
+        <item name="android:textColor">@color/toggle_dark_text</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:minHeight">36dp</item>
+        <item name="android:minWidth">64dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+    </style>
+</resources>

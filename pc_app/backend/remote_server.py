@@ -103,11 +103,14 @@ class _RemoteHandler(BaseHTTPRequestHandler):
         # API: Spotify now playing
         if path == "/api/spotify/now_playing":
             try:
+                from urllib.parse import urlparse, parse_qs
+                qs = parse_qs(urlparse(self.path).query)
+                force_fetch = qs.get("force", ["false"])[0].lower() in ("true", "1")
                 from backend.spotify_control import SpotifyControl
-                info = SpotifyControl.get_now_playing()
+                info = SpotifyControl.get_now_playing(force_fetch=force_fetch)
                 self._json_response(200, info)
             except Exception as e:
-                self._json_response(200, {"playing": False, "artist": "", "title": str(e), "album": "", "uri": ""})
+                self._json_response(200, {"playing": False, "artist": "", "title": str(e), "album": "", "uri": "", "position_ms": 0, "length_ms": 0, "position_s": 0, "length_s": 0})
             return
 
         # API: Spotify lyrics

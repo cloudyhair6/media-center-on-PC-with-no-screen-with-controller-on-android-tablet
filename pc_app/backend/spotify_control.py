@@ -35,14 +35,35 @@ import os
 import urllib.request
 
 class SpotifyControl:
-    """Control Spotify via spotify_cli.exe and read track info."""
+    """Control Spotify via Windows SMTC, spotify_cli.exe and fallback APIs."""
 
     _last_title = ""
-    _last_metadata = {"playing": False, "artist": "", "title": "", "album": "", "uri": "", "artwork": ""}
+    _last_artist = ""
+    _last_album = ""
     _last_uri = ""
     _last_artwork_url = ""
-    _last_album = ""
     _last_context_uri = ""
+    _last_context_desc = ""
+    _last_seek_time = 0.0
+    _last_seek_pos_ms = 0
+    _last_seek_is_active = False
+    _last_metadata = {
+        "playing": False,
+        "artist": "",
+        "title": "Spotify",
+        "album": "",
+        "uri": "",
+        "artwork": "",
+        "position_s": 0,
+        "length_s": 0,
+        "position_ms": 0,
+        "length_ms": 0,
+        "shuffle": False,
+        "repeat": 0,
+        "context": "",
+        "context_uri": "",
+        "is_ad": False
+    }
 
     @staticmethod
     def get_artwork(uri: str) -> str:
@@ -132,6 +153,26 @@ class SpotifyControl:
 
     @staticmethod
     def seek(ms: str, relative: bool = True) -> None:
+        try:
+            ms_int = int(ms)
+            cur_pos = SpotifyControl._last_metadata.get("position_ms", 0)
+            len_ms = SpotifyControl._last_metadata.get("length_ms", 0)
+            if relative:
+                target_pos = max(0, cur_pos + ms_int)
+            else:
+                target_pos = max(0, ms_int)
+            if len_ms > 0:
+                target_pos = min(target_pos, len_ms)
+            
+            SpotifyControl._last_seek_time = time.time()
+            SpotifyControl._last_seek_pos_ms = target_pos
+            SpotifyControl._last_seek_is_active = True
+            
+            SpotifyControl._last_metadata["position_ms"] = target_pos
+            SpotifyControl._last_metadata["position_s"] = int(target_pos / 1000)
+        except Exception:
+            pass
+
         args = ["seek", ms]
         if relative:
             args.append("--relative")
@@ -193,213 +234,323 @@ class SpotifyControl:
         return ": saved" in output
 
     @staticmethod
-    def get_playback_progress() -> dict:
-        import asyncio
+    def _fetch_smtc_info() -> dict | None:
+        """Fetch media properties, playback state, timeline and controls in a single async SMTC call."""
         try:
+            import asyncio
+            from datetime import datetime, timezone
             import winrt.windows.media.control as wmc
-            async def fetch():
+
+            async def _query():
                 try:
                     manager = await wmc.GlobalSystemMediaTransportControlsSessionManager.request_async()
-                    session = manager.get_current_session()
-                    if session:
-                        tl = session.get_timeline_properties()
-                        pb = session.get_playback_info()
-                        if tl is None:
-                            return {"position_s": 0, "length_s": 0, "position_ms": 0, "length_ms": 0}
-                        
-                        pos = tl.position.total_seconds()
-                        if pb and pb.playback_status == 4: # Playing
-                            from datetime import datetime, timezone
-                            now = datetime.now(timezone.utc)
-                            elapsed = (now - tl.last_updated_time).total_seconds()
-                            pos += max(0, elapsed)
-                            
-                        return {
-                            "position_s": int(pos),
-                            "length_s": int(tl.end_time.total_seconds()),
-                            "position_ms": int(pos * 1000),
-                            "length_ms": int(tl.end_time.total_seconds() * 1000)
-                        }
+                    if not manager:
+                        return None
+
+                    # Target Spotify session specifically
+                    session = None
+                    curr = manager.get_current_session()
+                    if curr and "spotify" in (curr.source_app_user_model_id or "").lower():
+                        session = curr
+                    else:
+                        for s in manager.get_sessions():
+                            if "spotify" in (s.source_app_user_model_id or "").lower():
+                                session = s
+                                break
+
+                    if not session:
+                        return None
+
+                    props = await session.try_get_media_properties_async()
+                    pb = session.get_playback_info()
+                    tl = session.get_timeline_properties()
+
+                    title = props.title if props else ""
+                    artist = props.artist if props else ""
+                    album = props.album_title if props else ""
+
+                    # Playback status: 4 is Playing, 5 is Paused, 3 is Stopped, 0 is Closed
+                    is_playing = (pb.playback_status == 4) if pb else False
+                    shuffle = bool(pb.is_shuffle_active) if (pb and pb.is_shuffle_active is not None) else False
+                    repeat = int(pb.auto_repeat_mode) if (pb and pb.auto_repeat_mode is not None) else 0
+
+                    pos_s = 0
+                    len_s = 0
+                    pos_ms = 0
+                    len_ms = 0
+
+                    if tl:
+                        if tl.end_time:
+                            total_s = tl.end_time.total_seconds()
+                            len_s = int(total_s)
+                            len_ms = int(total_s * 1000)
+                        if tl.position:
+                            cur_s = tl.position.total_seconds()
+                            if is_playing and tl.last_updated_time:
+                                now = datetime.now(timezone.utc)
+                                elapsed = (now - tl.last_updated_time).total_seconds()
+                                cur_s += max(0.0, elapsed)
+                            if len_s > 0:
+                                cur_s = min(cur_s, float(len_s))
+                            pos_s = int(cur_s)
+                            pos_ms = int(cur_s * 1000)
+
+                    # Reconcile recent seeks if SMTC timeline hasn't caught up
+                    now_time = time.time()
+                    if SpotifyControl._last_seek_is_active:
+                        seek_age = now_time - SpotifyControl._last_seek_time
+                        if seek_age < 2.5:
+                            seek_utc = datetime.fromtimestamp(SpotifyControl._last_seek_time, timezone.utc)
+                            if tl is None or tl.last_updated_time is None or tl.last_updated_time < seek_utc:
+                                seek_elapsed = seek_age if is_playing else 0.0
+                                est_ms = SpotifyControl._last_seek_pos_ms + int(seek_elapsed * 1000)
+                                if len_ms > 0:
+                                    est_ms = min(est_ms, len_ms)
+                                pos_ms = est_ms
+                                pos_s = int(est_ms / 1000)
+                        else:
+                            SpotifyControl._last_seek_is_active = False
+
+                    return {
+                        "title": title,
+                        "artist": artist,
+                        "album": album,
+                        "is_playing": is_playing,
+                        "shuffle": shuffle,
+                        "repeat": repeat,
+                        "position_s": pos_s,
+                        "length_s": len_s,
+                        "position_ms": pos_ms,
+                        "length_ms": len_ms,
+                    }
                 except Exception:
-                    pass
-                return {"position_s": 0, "length_s": 0, "position_ms": 0, "length_ms": 0}
-            return asyncio.run(fetch())
-        except ImportError:
-            return {"position_s": 0, "length_s": 0, "position_ms": 0, "length_ms": 0}
+                    return None
+
+            return asyncio.run(_query())
+        except Exception:
+            return None
+
+    @staticmethod
+    def get_playback_progress() -> dict:
+        smtc = SpotifyControl._fetch_smtc_info()
+        if smtc:
+            return {
+                "position_s": smtc.get("position_s", 0),
+                "length_s": smtc.get("length_s", 0),
+                "position_ms": smtc.get("position_ms", 0),
+                "length_ms": smtc.get("length_ms", 0)
+            }
+        
+        # Fallback if SMTC unavailable but seek was active
+        if SpotifyControl._last_seek_is_active and (time.time() - SpotifyControl._last_seek_time) < 2.5:
+            est_ms = SpotifyControl._last_seek_pos_ms
+            return {
+                "position_s": int(est_ms / 1000),
+                "length_s": SpotifyControl._last_metadata.get("length_s", 0),
+                "position_ms": est_ms,
+                "length_ms": SpotifyControl._last_metadata.get("length_ms", 0)
+            }
+        
+        return {
+            "position_s": SpotifyControl._last_metadata.get("position_s", 0),
+            "length_s": SpotifyControl._last_metadata.get("length_s", 0),
+            "position_ms": SpotifyControl._last_metadata.get("position_ms", 0),
+            "length_ms": SpotifyControl._last_metadata.get("length_ms", 0)
+        }
 
     @staticmethod
     def get_now_playing(force_fetch: bool = False) -> dict:
-        """Get track metadata quickly by observing window title changes, parsing JSON when changed."""
+        """Get track metadata with rock-solid song change detection via SMTC and CLI enrichment."""
         try:
-            hwnd = ctypes.windll.user32.FindWindowW("Chrome_WidgetWin_1", None)
-            
-            current_title = ""
-            if hwnd:
-                titles = []
-                @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
-                def enum_callback(h, _):
-                    length = ctypes.windll.user32.GetWindowTextLengthW(h)
-                    if length > 0:
-                        buf = ctypes.create_unicode_buffer(length + 1)
-                        ctypes.windll.user32.GetWindowTextW(h, buf, length + 1)
-                        title = buf.value
-                        if " - " in title:
-                            pid = ctypes.wintypes.DWORD()
-                            ctypes.windll.user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
-                            try:
-                                if "spotify" in psutil.Process(pid.value).name().lower():
-                                    titles.append(title)
-                            except Exception:
-                                pass
-                    return True
+            smtc_data = SpotifyControl._fetch_smtc_info()
 
-                ctypes.windll.user32.EnumWindows(enum_callback, 0)
-                for t in titles:
-                    if " - " in t and t.lower() not in ("spotify", "spotify free", "spotify premium"):
-                        current_title = t
-                        break
+            if smtc_data is not None:
+                title = smtc_data.get("title", "").strip()
+                artist = smtc_data.get("artist", "").strip()
+                album = smtc_data.get("album", "").strip()
+                is_playing = smtc_data.get("is_playing", False)
+                pos_s = smtc_data.get("position_s", 0)
+                len_s = smtc_data.get("length_s", 0)
+                pos_ms = smtc_data.get("position_ms", 0)
+                len_ms = smtc_data.get("length_ms", 0)
+                shuffle = smtc_data.get("shuffle", False)
+                repeat = smtc_data.get("repeat", 0)
 
-            if not force_fetch and current_title == SpotifyControl._last_title and current_title != "":
-                prog = SpotifyControl.get_playback_progress()
-                SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
-                SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
-                SpotifyControl._last_metadata["position_ms"] = prog.get("position_ms", 0)
-                SpotifyControl._last_metadata["length_ms"] = prog.get("length_ms", 0)
-                state = SpotifyControl.get_shuffle_repeat()
-                if state is not None:
-                    SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
-                    SpotifyControl._last_metadata["repeat"] = state["repeat"]
-                SpotifyControl._last_metadata["context_uri"] = getattr(SpotifyControl, "_last_context_uri", "")
-                SpotifyControl._last_metadata["context"] = getattr(SpotifyControl, "_last_context_desc", "")
-                return SpotifyControl._last_metadata
+                # Check if song changed
+                song_changed = (
+                    force_fetch or
+                    title != SpotifyControl._last_title or
+                    artist != SpotifyControl._last_artist or
+                    not SpotifyControl._last_metadata.get("title")
+                )
 
-            output = SpotifyControl._run_cli(["now-playing", "--format", "json"])
-            SpotifyControl._last_title = current_title
+                if not song_changed and title != "":
+                    # Fast-path: Same song, update dynamic playback timeline and controls
+                    SpotifyControl._last_metadata["playing"] = is_playing
+                    SpotifyControl._last_metadata["position_s"] = pos_s
+                    SpotifyControl._last_metadata["length_s"] = len_s
+                    SpotifyControl._last_metadata["position_ms"] = pos_ms
+                    SpotifyControl._last_metadata["length_ms"] = len_ms
+                    SpotifyControl._last_metadata["shuffle"] = shuffle
+                    SpotifyControl._last_metadata["repeat"] = repeat
+                    return SpotifyControl._last_metadata
 
-            if not output:
-                if current_title:
-                    parts = current_title.split(" - ", 1)
-                    SpotifyControl._last_metadata = {
-                        "playing": True,
-                        "artist": parts[0].strip(),
-                        "title": parts[1].strip(),
-                        "album": "",
-                        "uri": "",
-                        "artwork": SpotifyControl._last_artwork_url,
-                        "context": getattr(SpotifyControl, "_last_context_desc", ""),
-                        "context_uri": getattr(SpotifyControl, "_last_context_uri", "")
-                    }
-                else:
-                    SpotifyControl._last_metadata = {"playing": False, "artist": "", "title": "Spotify", "album": "", "uri": "", "artwork": "", "context": "", "context_uri": ""}
-                
-                prog = SpotifyControl.get_playback_progress()
-                SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
-                SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
-                SpotifyControl._last_metadata["position_ms"] = prog.get("position_ms", 0)
-                SpotifyControl._last_metadata["length_ms"] = prog.get("length_ms", 0)
-                state = SpotifyControl.get_shuffle_repeat()
-                if state is not None:
-                    SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
-                    SpotifyControl._last_metadata["repeat"] = state["repeat"]
-                SpotifyControl._last_metadata["context_uri"] = SpotifyControl._last_context_uri
-                return SpotifyControl._last_metadata
+                # Song has changed or empty title: Enrich with CLI for URI, Artwork, Context
+                SpotifyControl._last_title = title
+                SpotifyControl._last_artist = artist
+                if album:
+                    SpotifyControl._last_album = album
 
-            try:
-                data = json.loads(output)
-                cp = data.get("currently_playing", {})
-                is_playing = cp.get("is_playing", False)
-                desc = cp.get("description", "")
-                uri = cp.get("uri", "")
+                cli_output = SpotifyControl._run_cli(["now-playing", "--format", "json"])
+                uri = ""
+                context_desc = ""
+                is_ad = False
 
-                if uri != SpotifyControl._last_uri and uri:
-                    # Fetch extra metadata (album name and artwork) using lookup
+                if cli_output:
+                    try:
+                        cli_json = json.loads(cli_output)
+                        cp = cli_json.get("currently_playing", {})
+                        if not cp and "track" in cli_json:
+                            # Alternate CLI format
+                            track = cli_json.get("track", {})
+                            uri = track.get("uri", "")
+                        else:
+                            uri = cp.get("uri", "")
+                        is_ad = uri.startswith("spotify:ad:")
+
+                        # Context handling
+                        ctx_obj = cp.get("context", {}) if cp else {}
+                        if ctx_obj and isinstance(ctx_obj, dict):
+                            actual_ctx = ctx_obj.get("uri", "")
+                            if actual_ctx:
+                                SpotifyControl._last_context_uri = actual_ctx
+                        
+                        context_desc = cp.get("context_description", "") if cp else ""
+                        if not context_desc:
+                            if SpotifyControl._last_context_uri == "spotify:collection:tracks":
+                                context_desc = "Liked Songs"
+                            elif SpotifyControl._last_context_uri:
+                                try:
+                                    lookup_out = SpotifyControl._run_cli(["lookup", SpotifyControl._last_context_uri, "--format", "json"])
+                                    ent = json.loads(lookup_out).get("entities", [{}])[0]
+                                    context_desc = ent.get("name", "")
+                                except Exception:
+                                    pass
+                            SpotifyControl._last_context_desc = context_desc
+                        else:
+                            SpotifyControl._last_context_desc = context_desc
+                    except Exception:
+                        pass
+
+                # Artwork resolution
+                if uri and uri != SpotifyControl._last_uri:
                     SpotifyControl._last_uri = uri
                     try:
                         lookup_out = SpotifyControl._run_cli(["lookup", uri, "--format", "json"])
                         entities = json.loads(lookup_out).get("entities", [])
                         ent = entities[0] if entities else {}
                         SpotifyControl._last_artwork_url = ent.get("image_url", "")
-                        SpotifyControl._last_album = ent.get("parent", {}).get("name", "")
+                        if not SpotifyControl._last_album and ent.get("parent", {}).get("name"):
+                            SpotifyControl._last_album = ent.get("parent", {}).get("name", "")
                     except Exception:
                         SpotifyControl._last_artwork_url = SpotifyControl.get_artwork(uri)
-                        SpotifyControl._last_album = ""
-                elif not uri:
+                elif not uri and not SpotifyControl._last_uri:
                     SpotifyControl._last_artwork_url = ""
-                    SpotifyControl._last_uri = ""
-                    SpotifyControl._last_album = ""
 
+                SpotifyControl._last_metadata = {
+                    "playing": is_playing,
+                    "title": title if title else ("Advertisement" if is_ad else "Spotify"),
+                    "artist": artist if artist else ("Advertisement" if is_ad else ""),
+                    "album": SpotifyControl._last_album if SpotifyControl._last_album else album,
+                    "context": SpotifyControl._last_context_desc,
+                    "context_uri": SpotifyControl._last_context_uri,
+                    "uri": uri if uri else SpotifyControl._last_uri,
+                    "artwork": SpotifyControl._last_artwork_url,
+                    "position_s": pos_s,
+                    "length_s": len_s,
+                    "position_ms": pos_ms,
+                    "length_ms": len_ms,
+                    "shuffle": shuffle,
+                    "repeat": repeat,
+                    "is_ad": is_ad,
+                }
+                return SpotifyControl._last_metadata
+
+            # Fallback when SMTC is unavailable (CLI only fallback)
+            output = SpotifyControl._run_cli(["now-playing", "--format", "json"])
+            if not output:
+                if not SpotifyControl.is_running():
+                    return {"playing": False, "artist": "", "title": "Not Playing", "album": "", "uri": "", "artwork": "", "position_s": 0, "length_s": 0, "position_ms": 0, "length_ms": 0, "shuffle": False, "repeat": 0, "context": "", "context_uri": "", "is_ad": False}
+                return SpotifyControl._last_metadata
+
+            # Parse CLI output when SMTC is unavailable
+            data = json.loads(output)
+            cp = data.get("currently_playing", {})
+            if not cp and "track" in data:
+                track = data.get("track", {})
+                is_playing = data.get("is_playing", False)
+                title = track.get("name", "")
+                artists = track.get("artists", [])
+                artist = artists[0].get("name", "") if artists else ""
+                album_obj = track.get("album", {})
+                album_text = album_obj.get("name", "")
+                uri = track.get("uri", "")
+                is_ad = uri.startswith("spotify:ad:")
+            else:
+                is_playing = cp.get("is_playing", False)
+                desc = cp.get("description", "")
+                uri = cp.get("uri", "")
                 title = desc
                 artist = ""
-                # Attempt to split on common dash chars including the mangled output user showed
                 for dash in [" \u2014 ", " \u2013 ", " - ", " \u00d4\u00c7\u00f6 "]:
                     if dash in desc:
                         parts = desc.split(dash, 1)
                         title = parts[0].strip()
                         artist = parts[1].strip()
                         break
-
                 is_ad = uri.startswith("spotify:ad:")
-                
-                # Use context_description as fallback if album is missing
                 album_text = SpotifyControl._last_album
-                
-                # Try to extract context from API response
-                ctx_obj = cp.get("context", {})
-                if ctx_obj and isinstance(ctx_obj, dict):
-                    actual_ctx_uri = ctx_obj.get("uri", "")
-                    if actual_ctx_uri:
-                        SpotifyControl._last_context_uri = actual_ctx_uri
-                
-                context_desc = cp.get("context_description", "")
-                if not context_desc:
-                    if not hasattr(SpotifyControl, '_last_fetched_context_uri') or SpotifyControl._last_context_uri != getattr(SpotifyControl, '_last_fetched_context_uri', ''):
-                        setattr(SpotifyControl, '_last_fetched_context_uri', SpotifyControl._last_context_uri)
-                        if SpotifyControl._last_context_uri == "spotify:collection:tracks":
-                            setattr(SpotifyControl, '_last_context_desc', "Liked Songs")
-                        elif SpotifyControl._last_context_uri:
-                            try:
-                                lookup_out = SpotifyControl._run_cli(["lookup", SpotifyControl._last_context_uri, "--format", "json"])
-                                ent = json.loads(lookup_out).get("entities", [{}])[0]
-                                setattr(SpotifyControl, '_last_context_desc', ent.get("name", ""))
-                            except Exception:
-                                setattr(SpotifyControl, '_last_context_desc', "")
-                        else:
-                            setattr(SpotifyControl, '_last_context_desc', "")
-                    context_desc = getattr(SpotifyControl, '_last_context_desc', "")
-                else:
-                    setattr(SpotifyControl, '_last_context_desc', context_desc)
-                    setattr(SpotifyControl, '_last_fetched_context_uri', SpotifyControl._last_context_uri)
 
-                SpotifyControl._last_metadata = {
-                    "playing": is_playing,
-                    "title": title,
-                    "artist": artist,
-                    "album": album_text,
-                    "context": context_desc,
-                    "context_uri": SpotifyControl._last_context_uri,
-                    "uri": uri,
-                    "artwork": SpotifyControl._last_artwork_url,
-                    "is_ad": is_ad
-                }
+            if uri != SpotifyControl._last_uri and uri:
+                SpotifyControl._last_uri = uri
+                try:
+                    lookup_out = SpotifyControl._run_cli(["lookup", uri, "--format", "json"])
+                    entities = json.loads(lookup_out).get("entities", [])
+                    ent = entities[0] if entities else {}
+                    SpotifyControl._last_artwork_url = ent.get("image_url", "")
+                    SpotifyControl._last_album = ent.get("parent", {}).get("name", "")
+                except Exception:
+                    SpotifyControl._last_artwork_url = SpotifyControl.get_artwork(uri)
+                    SpotifyControl._last_album = ""
 
-                prog = SpotifyControl.get_playback_progress()
-                SpotifyControl._last_metadata["position_s"] = prog.get("position_s", 0)
-                SpotifyControl._last_metadata["length_s"] = prog.get("length_s", 0)
-                
-                state = SpotifyControl.get_shuffle_repeat()
-                if state is not None:
-                    SpotifyControl._last_metadata["shuffle"] = state["shuffle"]
-                    SpotifyControl._last_metadata["repeat"] = state["repeat"]
+            prog = SpotifyControl.get_playback_progress()
+            pos_s = prog.get("position_s", 0)
+            len_s = prog.get("length_s", 0)
+            pos_ms = prog.get("position_ms", 0)
+            len_ms = prog.get("length_ms", 0)
 
-                return SpotifyControl._last_metadata
-
-            except Exception as e:
-                print(f"Error parsing CLI JSON: {e}")
-                return {"playing": False, "artist": "", "title": "Spotify", "album": "", "uri": "", "artwork": ""}
+            SpotifyControl._last_metadata = {
+                "playing": is_playing,
+                "title": title,
+                "artist": artist,
+                "album": SpotifyControl._last_album if SpotifyControl._last_album else album_text,
+                "context": SpotifyControl._last_context_desc,
+                "context_uri": SpotifyControl._last_context_uri,
+                "uri": uri,
+                "artwork": SpotifyControl._last_artwork_url,
+                "position_s": pos_s,
+                "length_s": len_s,
+                "position_ms": pos_ms,
+                "length_ms": len_ms,
+                "shuffle": False,
+                "repeat": 0,
+                "is_ad": is_ad
+            }
+            return SpotifyControl._last_metadata
 
         except Exception as e:
             print(f"SpotifyControl error: {e}")
-            return {"playing": False, "artist": "", "title": "", "album": "", "uri": "", "artwork": ""}
+            return {"playing": False, "artist": "", "title": "", "album": "", "uri": "", "artwork": "", "position_s": 0, "length_s": 0, "position_ms": 0, "length_ms": 0, "shuffle": False, "repeat": 0, "context": "", "context_uri": "", "is_ad": False}
 
     @staticmethod
     def get_folder_hierarchy() -> dict:
@@ -436,27 +587,15 @@ class SpotifyControl:
         return "Failed" not in output and "client error" not in output.lower()
 
     @staticmethod
-    def get_shuffle_repeat() -> dict:
+    def get_shuffle_repeat() -> dict | None:
         """Get shuffle and repeat states using Windows SMTC."""
-        try:
-            import asyncio
-            from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
-            import winrt.windows.media
-
-            async def _get_state():
-                manager = await GlobalSystemMediaTransportControlsSessionManager.request_async()
-                session = manager.get_current_session()
-                if session and "Spotify" in session.source_app_user_model_id:
-                    info = session.get_playback_info()
-                    return {
-                        "shuffle": info.is_shuffle_active,
-                        "repeat": int(info.auto_repeat_mode)
-                    }
-                return None
-
-            return asyncio.run(_get_state())
-        except Exception as e:
-            return None
+        smtc = SpotifyControl._fetch_smtc_info()
+        if smtc:
+            return {
+                "shuffle": smtc.get("shuffle", False),
+                "repeat": smtc.get("repeat", 0)
+            }
+        return None
 
     @staticmethod
     def repeat(state: str) -> bool:

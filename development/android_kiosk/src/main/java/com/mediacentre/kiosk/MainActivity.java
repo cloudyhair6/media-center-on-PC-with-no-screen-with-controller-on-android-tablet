@@ -22,6 +22,7 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -54,6 +55,16 @@ public class MainActivity extends Activity {
     private TextView loadingText;
     private TextView statusToast;
 
+    // Connection Status Indicator
+    public static final int STATUS_ONLINE = 0;
+    public static final int STATUS_CONNECTING = 1;
+    public static final int STATUS_OFFLINE = 2;
+    private LinearLayout connectionStatusContainer;
+    private View connectionStatusDot;
+    private TextView connectionStatusText;
+    private int currentConnectionStatus = STATUS_OFFLINE;
+    private int consecutiveConnectionFailures = 0;
+
     // Tabs
     private LinearLayout tabMusic;
     private ScrollView tabSettings;
@@ -61,7 +72,10 @@ public class MainActivity extends Activity {
     private Button[] tabButtons;
 
     // Music Sub-tabs
+    private FrameLayout musicNowPlayingContainer;
     private ScrollView musicNowPlaying;
+    private LinearLayout npLoadingOverlay;
+    private TextView npLoadingText;
     private LinearLayout musicSearch;
     private ScrollView musicLibrary;
     private ScrollView musicQueue;
@@ -71,6 +85,8 @@ public class MainActivity extends Activity {
     private java.util.List<LyricLine> currentLyrics = new java.util.ArrayList<>();
     private int currentLyricLineIndex = -1;
     private String currentNpUri = "";
+    private String lastNpTitle = "";
+    private String lastNpArtist = "";
     private String currentContextUri = "";
     private TextView npContext;
     private boolean isLiked = false;
@@ -81,12 +97,18 @@ public class MainActivity extends Activity {
     private SeekBar npProgress;
     private int currentPositionS = 0;
     private int currentLengthS = 0;
+    private int currentPositionMs = 0;
+    private long lastSyncTimeMs = 0;
     private boolean isNpPlaying = false;
+    private boolean isTrackingNpProgress = false;
+    private long lastSeekRequestTimeMs = 0;
+    private static final long SEEK_IGNORE_POLL_MS = 2500;
     private ImageView npArtwork;
     private String currentLibraryFolderUri = null;
     private JSONArray cachedLibraryItems = null;
     // UI Elements - Settings
     private ToggleButton toggleAlbumArt;
+    private ToggleButton togglePixelPerfectArt;
     private Button btnTheme;
     private TextView cpuText, ramText, diskText, gpuText, lastUpdatedText;
     private ProgressBar cpuBar, ramBar, diskBar, gpuBar;
@@ -98,6 +120,117 @@ public class MainActivity extends Activity {
     private boolean allowSettings = false;
     private boolean shuffleOn = false;
     private String repeatState = "off";
+
+    private void updateConnectionStatus(final int status) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                currentConnectionStatus = status;
+                if (connectionStatusDot == null || connectionStatusText == null) return;
+                switch (status) {
+                    case STATUS_ONLINE:
+                        connectionStatusDot.setBackgroundResource(R.drawable.dot_online);
+                        connectionStatusText.setText("Online");
+                        connectionStatusText.setTextColor(0xFF00E676);
+                        break;
+                    case STATUS_CONNECTING:
+                        connectionStatusDot.setBackgroundResource(R.drawable.dot_connecting);
+                        connectionStatusText.setText("Connecting...");
+                        connectionStatusText.setTextColor(0xFFFFA726);
+                        break;
+                    case STATUS_OFFLINE:
+                    default:
+                        connectionStatusDot.setBackgroundResource(R.drawable.dot_offline);
+                        connectionStatusText.setText("Offline");
+                        connectionStatusText.setTextColor(0xFFFF5252);
+                        break;
+                }
+            }
+        });
+    }
+
+    private void onConnectionSuccess() {
+        consecutiveConnectionFailures = 0;
+        if (currentConnectionStatus != STATUS_ONLINE) {
+            updateConnectionStatus(STATUS_ONLINE);
+        }
+    }
+
+    private void onConnectionFailure() {
+        consecutiveConnectionFailures++;
+        if (consecutiveConnectionFailures >= 2) {
+            if (currentConnectionStatus != STATUS_OFFLINE) {
+                updateConnectionStatus(STATUS_OFFLINE);
+            }
+        } else {
+            if (currentConnectionStatus != STATUS_CONNECTING) {
+                updateConnectionStatus(STATUS_CONNECTING);
+            }
+        }
+    }
+
+    private void showNpLoading(final String message) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (npLoadingOverlay != null) {
+                    if (npLoadingText != null && message != null) {
+                        npLoadingText.setText(message);
+                    }
+                    npLoadingOverlay.setVisibility(View.VISIBLE);
+                }
+            }
+        });
+    }
+
+    private void hideNpLoading() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (npLoadingOverlay != null) {
+                    npLoadingOverlay.setVisibility(View.GONE);
+                }
+            }
+        });
+    }
+
+    private void styleDynamicButton(Button b) {
+        if (b == null) return;
+        String currentTheme = prefs != null ? prefs.getString("theme", "dark") : "dark";
+        if ("native".equals(currentTheme)) {
+            b.setBackgroundResource(android.R.drawable.btn_default);
+            b.setTextColor(android.graphics.Color.BLACK);
+        } else if ("light".equals(currentTheme)) {
+            b.setBackgroundResource(android.R.drawable.btn_default);
+            b.setTextColor(android.graphics.Color.parseColor("#1a1a2e"));
+        } else {
+            b.setBackgroundResource(R.drawable.btn_dark);
+            try {
+                b.setTextColor(getResources().getColorStateList(R.color.btn_dark_text));
+            } catch (Exception e) {
+                b.setTextColor(0xFFffffff);
+            }
+        }
+    }
+
+    private void styleDynamicToggleButton(ToggleButton tb) {
+        if (tb == null) return;
+        String currentTheme = prefs != null ? prefs.getString("theme", "dark") : "dark";
+        if ("native".equals(currentTheme)) {
+            tb.setBackgroundResource(android.R.drawable.btn_default);
+            tb.setTextColor(android.graphics.Color.BLACK);
+        } else if ("light".equals(currentTheme)) {
+            tb.setBackgroundResource(android.R.drawable.btn_default);
+            tb.setTextColor(android.graphics.Color.parseColor("#1a1a2e"));
+        } else {
+            tb.setBackgroundResource(R.drawable.btn_toggle_dark);
+            try {
+                tb.setTextColor(getResources().getColorStateList(R.color.toggle_dark_text));
+            } catch (Exception e) {
+                tb.setTextColor(0xFFffffff);
+            }
+        }
+    }
 
     // Polling Runnables
     private boolean isSpotifyPolling = false;
@@ -114,97 +247,17 @@ public class MainActivity extends Activity {
                     @Override
                     public void onSuccess(String response) {
                         isSpotifyPolling = false;
+                        onConnectionSuccess();
                         try {
                             JSONObject json = new JSONObject(response);
-                            npTitle.setText(json.optString("title", "Not Playing"));
-                            npArtist.setText(json.optString("artist", ""));
-                            npAlbum.setText(json.optString("album", ""));
-                            isNpPlaying = json.optBoolean("playing", false);
-                            boolean isAd = json.optBoolean("is_ad", false);
-                            if (isAd) {
-                                npArtist.setText("Advertisement");
-                                if (npArtwork != null) {
-                                    npArtwork.setColorFilter(android.graphics.Color.argb(150, 255, 255, 0), android.graphics.PorterDuff.Mode.SRC_ATOP);
-                                }
-                            } else {
-                                if (npArtwork != null) {
-                                    npArtwork.clearColorFilter();
-                                }
-                            }
-                            currentPositionS = json.optInt("position_s", 0);
-                            currentLengthS = json.optInt("length_s", 0);
-                            currentPositionMs = json.optInt("position_ms", currentPositionS * 1000);
-                            lastSyncTimeMs = System.currentTimeMillis();
-                            if (npTimeCurrent != null) npTimeCurrent.setText(formatTime(currentPositionS));
-                            if (npTimeTotal != null) npTimeTotal.setText(formatTime(currentLengthS));
-                            if (npProgress != null) {
-                                npProgress.setMax(currentLengthS);
-                                npProgress.setProgress(currentPositionS);
-                            }
-                            // Lyrics sync is now handled smoothly by lyricsSyncRunnable
-                            String uri = json.optString("uri", "");
-                            String ctxUri = json.optString("context_uri", "");
-                            String ctxDesc = json.optString("context", "");
-                            
-                            if (npContext != null) {
-                                if (ctxDesc != null && !ctxDesc.isEmpty()) {
-                                    npContext.setText("Playing from: " + ctxDesc);
-                                    npContext.setVisibility(View.VISIBLE);
-                                } else {
-                                    npContext.setVisibility(View.GONE);
-                                }
-                            }
-                            
-                            if (!ctxUri.equals(currentContextUri)) {
-                                currentContextUri = ctxUri;
-                                if (musicLibrary != null && musicLibrary.getVisibility() == View.VISIBLE) {
-                                    renderLibraryFolder();
-                                }
-                            }
-                            
-                            if (!uri.equals(currentNpUri)) {
-                                currentNpUri = uri;
-                                if (!uri.isEmpty()) {
-                                    if (prefs.getBoolean("show_album_art", true)) {
-                                        loadAlbumArt(uri);
-                                    }
-                                    checkIfLiked(uri);
-                                    
-                                    if (musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE) {
-                                        fetchLyrics(json.optString("title", ""), json.optString("artist", ""));
-                                    }
-                                }
-                            }
-                            
-                            // Sync shuffle and repeat states
-                            if (json.has("shuffle")) {
-                                shuffleOn = json.optBoolean("shuffle", false);
-                                Button btnShuf = (Button) findViewById(R.id.btn_shuffle);
-                                if (btnShuf != null) {
-                                    btnShuf.setText("Shuffle: " + (shuffleOn ? "ON" : "OFF"));
-                                    btnShuf.setTextColor(shuffleOn ? 0xFF00d4ff : 0xFFffffff);
-                                }
-                            }
-                            if (json.has("repeat")) {
-                                int rep = json.optInt("repeat", 0);
-                                if (rep == 1) repeatState = "track";
-                                else if (rep == 2) repeatState = "context";
-                                else repeatState = "off";
-                                
-                                Button btnRep = (Button) findViewById(R.id.btn_repeat);
-                                if (btnRep != null) {
-                                    String label = "OFF";
-                                    if (repeatState.equals("context")) label = "ALL";
-                                    if (repeatState.equals("track")) label = "ONE";
-                                    btnRep.setText("Repeat: " + label);
-                                    btnRep.setTextColor(repeatState.equals("off") ? 0xFFffffff : 0xFF00d4ff);
-                                }
-                            }
+                            updateNowPlayingFromJson(json);
                         } catch (Exception e) {}
                     }
                     @Override
                     public void onError(String error) {
                         isSpotifyPolling = false;
+                        hideNpLoading();
+                        onConnectionFailure();
                     }
                 });
                 
@@ -228,20 +281,298 @@ public class MainActivity extends Activity {
         }
     };
 
+    private void updateNowPlayingFromJson(JSONObject json) {
+        hideNpLoading();
+        if (json == null) return;
+        try {
+            String title = json.optString("title", "Not Playing");
+            String artist = json.optString("artist", "");
+            String album = json.optString("album", "");
+            isNpPlaying = json.optBoolean("playing", false);
+            boolean isAd = json.optBoolean("is_ad", false);
+
+            if (npTitle != null) npTitle.setText(title);
+            if (npArtist != null) npArtist.setText(isAd ? "Advertisement" : artist);
+            if (npAlbum != null) npAlbum.setText(album);
+
+            if (isAd) {
+                if (npArtwork != null) {
+                    npArtwork.setColorFilter(android.graphics.Color.argb(150, 255, 255, 0), android.graphics.PorterDuff.Mode.SRC_ATOP);
+                }
+            } else {
+                if (npArtwork != null) {
+                    npArtwork.clearColorFilter();
+                }
+            }
+
+            int incomingPosS = json.optInt("position_s", 0);
+            int incomingLenS = json.optInt("length_s", 0);
+            int incomingPosMs = json.optInt("position_ms", incomingPosS * 1000);
+
+            currentLengthS = incomingLenS;
+            if (npTimeTotal != null) npTimeTotal.setText(formatTime(currentLengthS));
+            if (npProgress != null) npProgress.setMax(currentLengthS);
+
+            long timeSinceSeek = System.currentTimeMillis() - lastSeekRequestTimeMs;
+            if (timeSinceSeek > SEEK_IGNORE_POLL_MS) {
+                currentPositionS = incomingPosS;
+                currentPositionMs = incomingPosMs;
+                lastSyncTimeMs = System.currentTimeMillis();
+                if (npTimeCurrent != null && !isTrackingNpProgress) {
+                    npTimeCurrent.setText(formatTime(currentPositionS));
+                }
+                if (npProgress != null && !isTrackingNpProgress) {
+                    npProgress.setProgress(currentPositionS);
+                }
+            }
+
+            String uri = json.optString("uri", "");
+            String ctxUri = json.optString("context_uri", "");
+            String ctxDesc = json.optString("context", "");
+
+            if (npContext != null) {
+                if (ctxDesc != null && !ctxDesc.isEmpty()) {
+                    npContext.setText("Playing from: " + ctxDesc);
+                    npContext.setVisibility(View.VISIBLE);
+                } else {
+                    npContext.setVisibility(View.GONE);
+                }
+            }
+
+            if (!ctxUri.equals(currentContextUri)) {
+                currentContextUri = ctxUri;
+                if (musicLibrary != null && musicLibrary.getVisibility() == View.VISIBLE) {
+                    renderLibraryFolder();
+                }
+            }
+
+            boolean trackChanged = false;
+            if (!uri.isEmpty() && !uri.equals(currentNpUri)) {
+                trackChanged = true;
+                currentNpUri = uri;
+            } else if (uri.isEmpty() && (!title.equals(lastNpTitle) || !artist.equals(lastNpArtist))) {
+                trackChanged = true;
+            }
+
+            if (trackChanged) {
+                lastNpTitle = title;
+                lastNpArtist = artist;
+
+                if (prefs.getBoolean("show_album_art", true)) {
+                    loadAlbumArt(currentNpUri);
+                }
+                if (!currentNpUri.isEmpty()) {
+                    checkIfLiked(currentNpUri);
+                }
+
+                if (musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE) {
+                    if (!isAd && !title.isEmpty() && !title.equals("Not Playing") && !title.equals("Spotify") && !title.equals("Refreshing...")) {
+                        fetchLyrics(title, artist);
+                    }
+                }
+            } else {
+                lastNpTitle = title;
+                lastNpArtist = artist;
+            }
+
+            // Sync shuffle and repeat states
+            if (json.has("shuffle")) {
+                shuffleOn = json.optBoolean("shuffle", false);
+                Button btnShuf = (Button) findViewById(R.id.btn_shuffle);
+                if (btnShuf != null) {
+                    btnShuf.setText("Shuffle: " + (shuffleOn ? "ON" : "OFF"));
+                    btnShuf.setTextColor(shuffleOn ? 0xFF00d4ff : 0xFFffffff);
+                }
+            }
+            if (json.has("repeat")) {
+                int rep = json.optInt("repeat", 0);
+                if (rep == 1) repeatState = "track";
+                else if (rep == 2) repeatState = "context";
+                else repeatState = "off";
+
+                Button btnRep = (Button) findViewById(R.id.btn_repeat);
+                if (btnRep != null) {
+                    String label = "OFF";
+                    if (repeatState.equals("context")) label = "ALL";
+                    if (repeatState.equals("track")) label = "ONE";
+                    btnRep.setText("Repeat: " + label);
+                    btnRep.setTextColor(repeatState.equals("off") ? 0xFFffffff : 0xFF00d4ff);
+                }
+            }
+        } catch (Exception e) {
+            android.util.Log.e("DEBUG", "updateNowPlayingFromJson failed", e);
+        }
+    }
+
+    private void seekTo(int positionMs, boolean isAbsolute) {
+        int targetMs;
+        if (isAbsolute) {
+            targetMs = Math.max(0, positionMs);
+            if (currentLengthS > 0) {
+                targetMs = Math.min(targetMs, currentLengthS * 1000);
+            }
+        } else {
+            targetMs = Math.max(0, currentPositionMs + positionMs);
+            if (currentLengthS > 0) {
+                targetMs = Math.min(targetMs, currentLengthS * 1000);
+            }
+        }
+
+        currentPositionMs = targetMs;
+        currentPositionS = targetMs / 1000;
+        lastSyncTimeMs = System.currentTimeMillis();
+        lastSeekRequestTimeMs = System.currentTimeMillis();
+
+        if (npTimeCurrent != null) {
+            npTimeCurrent.setText(formatTime(currentPositionS));
+        }
+        if (npProgress != null && !isTrackingNpProgress) {
+            npProgress.setProgress(currentPositionS);
+        }
+        updateLyricsSync(targetMs);
+
+        String url = isAbsolute ?
+            ("/api/spotify/seek?ms=" + targetMs + "&type=absolute") :
+            ("/api/spotify/seek?ms=" + positionMs + "&type=relative");
+
+        if (api != null) {
+            api.get(url, new ApiClient.Callback() {
+                @Override public void onSuccess(String response) {}
+                @Override public void onError(String error) {}
+            });
+        }
+    }
+
+    private void refreshLyricsOnOpen() {
+        if (api == null) {
+            if (lyricsContent != null) {
+                clearContainerViews(lyricsContent);
+                TextView tv = new TextView(MainActivity.this);
+                tv.setText("Not connected to PC");
+                tv.setTextColor(0xFF8892b0);
+                tv.setTextSize(18);
+                tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                tv.setPadding(0, 40, 0, 0);
+                lyricsContent.addView(tv);
+            }
+            return;
+        }
+
+        // Display non-blocking in-container loading indicator if lyrics not yet loaded
+        if (currentLyrics.isEmpty() || (npTitle != null && !npTitle.getText().toString().equals(currentLyricsTrack))) {
+            if (lyricsContent != null) {
+                clearContainerViews(lyricsContent);
+                TextView loadingTv = new TextView(MainActivity.this);
+                loadingTv.setText("Checking current song...");
+                loadingTv.setTextColor(0xFF8892b0);
+                loadingTv.setTextSize(18);
+                loadingTv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                loadingTv.setPadding(0, 40, 0, 0);
+                lyricsContent.addView(loadingTv);
+            }
+        }
+
+        // Actively query /api/spotify/now_playing with force=true to get fresh track state
+        api.get("/api/spotify/now_playing?force=true", new ApiClient.Callback() {
+            @Override
+            public void onSuccess(final String response) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            JSONObject json = new JSONObject(response);
+                            updateNowPlayingFromJson(json);
+
+                            String title = json.optString("title", "");
+                            String artist = json.optString("artist", "");
+                            boolean isAd = json.optBoolean("is_ad", false);
+
+                            if (isAd) {
+                                currentLyricsTrack = "";
+                                currentLyrics.clear();
+                                currentLyricLineIndex = -1;
+                                if (lyricsContent != null) {
+                                    clearContainerViews(lyricsContent);
+                                    TextView tv = new TextView(MainActivity.this);
+                                    tv.setText("Advertisement playing");
+                                    tv.setTextColor(0xFF8892b0);
+                                    tv.setTextSize(18);
+                                    tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                                    tv.setPadding(0, 40, 0, 0);
+                                    lyricsContent.addView(tv);
+                                }
+                            } else if (title.isEmpty() || title.equals("Not Playing") || title.equals("Spotify") || title.equals("Refreshing...")) {
+                                currentLyricsTrack = "";
+                                currentLyrics.clear();
+                                currentLyricLineIndex = -1;
+                                if (lyricsContent != null) {
+                                    clearContainerViews(lyricsContent);
+                                    TextView tv = new TextView(MainActivity.this);
+                                    tv.setText("No song currently playing");
+                                    tv.setTextColor(0xFF8892b0);
+                                    tv.setTextSize(18);
+                                    tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                                    tv.setPadding(0, 40, 0, 0);
+                                    lyricsContent.addView(tv);
+                                }
+                            } else {
+                                if (!title.equals(currentLyricsTrack) || currentLyrics.isEmpty()) {
+                                    fetchLyrics(title, artist);
+                                } else {
+                                    // Track already loaded: update sync position immediately
+                                    updateLyricsSync(currentPositionMs);
+                                }
+                            }
+                        } catch (Exception e) {
+                            String fbTitle = npTitle != null ? npTitle.getText().toString() : "";
+                            String fbArtist = npArtist != null ? npArtist.getText().toString() : "";
+                            fetchLyrics(fbTitle, fbArtist);
+                        }
+                    }
+                });
+            }
+
+            @Override
+            public void onError(final String error) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        String fbTitle = npTitle != null ? npTitle.getText().toString() : "";
+                        String fbArtist = npArtist != null ? npArtist.getText().toString() : "";
+                        if (!fbTitle.isEmpty() && !fbTitle.equals("Not Playing") && !fbTitle.equals("Refreshing...") && !fbTitle.equals("Spotify")) {
+                            fetchLyrics(fbTitle, fbArtist);
+                        } else {
+                            if (lyricsContent != null) {
+                                clearContainerViews(lyricsContent);
+                                TextView tv = new TextView(MainActivity.this);
+                                tv.setText("Unable to sync now playing with PC");
+                                tv.setTextColor(0xFF8892b0);
+                                tv.setTextSize(18);
+                                tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                                tv.setPadding(0, 40, 0, 0);
+                                lyricsContent.addView(tv);
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    }
+
     private Runnable progressExtrapolator = new Runnable() {
         @Override
         public void run() {
-            if (isNpPlaying && currentLengthS > 0 && currentPositionS < currentLengthS) {
-                currentPositionS++;
+            if (isNpPlaying && currentLengthS > 0 && !isTrackingNpProgress) {
+                long elapsed = System.currentTimeMillis() - lastSyncTimeMs;
+                int estS = (currentPositionMs + (int) elapsed) / 1000;
+                if (estS > currentLengthS) estS = currentLengthS;
+                currentPositionS = estS;
                 if (npTimeCurrent != null) npTimeCurrent.setText(formatTime(currentPositionS));
                 if (npProgress != null) npProgress.setProgress(currentPositionS);
             }
             handler.postDelayed(this, 1000);
         }
     };
-
-    private int currentPositionMs = 0;
-    private long lastSyncTimeMs = 0;
 
     private Runnable lyricsSyncRunnable = new Runnable() {
         @Override
@@ -270,6 +601,7 @@ public class MainActivity extends Activity {
                     @Override
                     public void onSuccess(String response) {
                         isSysStatsPolling = false;
+                        onConnectionSuccess();
                         try {
                             JSONObject json = new JSONObject(response);
                             int cpu = json.optInt("cpu", 0);
@@ -292,6 +624,7 @@ public class MainActivity extends Activity {
                     @Override
                     public void onError(String error) {
                         isSysStatsPolling = false;
+                        onConnectionFailure();
                     }
                 });
             }
@@ -349,15 +682,22 @@ public class MainActivity extends Activity {
     private BitmapCache bitmapCache = new BitmapCache();
 
     private static Bitmap decodeSampledBitmapFromBytes(byte[] data, int reqWidth, int reqHeight) {
+        return decodeSampledBitmapFromBytes(data, reqWidth, reqHeight, false);
+    }
+
+    private static Bitmap decodeSampledBitmapFromBytes(byte[] data, int reqWidth, int reqHeight, boolean pixelPerfect) {
         if (data == null || data.length == 0) return null;
         try {
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inPreferredConfig = Bitmap.Config.RGB_565;
-            if (reqWidth > 0 && reqHeight > 0) {
+            options.inScaled = false;
+            if (!pixelPerfect && reqWidth > 0 && reqHeight > 0) {
                 options.inJustDecodeBounds = true;
                 BitmapFactory.decodeByteArray(data, 0, data.length, options);
                 options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight);
                 options.inJustDecodeBounds = false;
+            } else {
+                options.inSampleSize = 1;
             }
             return BitmapFactory.decodeByteArray(data, 0, data.length, options);
         } catch (Throwable t) {
@@ -577,6 +917,11 @@ public class MainActivity extends Activity {
         try { loadingText = (TextView) findViewById(R.id.loading_text); } catch (Exception e) { android.util.Log.e("DEBUG", "loading_text failed", e); }
         try { statusToast = (TextView) findViewById(R.id.status_toast); } catch (Exception e) { android.util.Log.e("DEBUG", "status_toast failed", e); }
 
+        try { connectionStatusContainer = (LinearLayout) findViewById(R.id.connection_status_container); } catch (Exception e) { android.util.Log.e("DEBUG", "connectionStatusContainer failed", e); }
+        try { connectionStatusDot = (View) findViewById(R.id.connection_status_dot); } catch (Exception e) { android.util.Log.e("DEBUG", "connectionStatusDot failed", e); }
+        try { connectionStatusText = (TextView) findViewById(R.id.connection_status_text); } catch (Exception e) { android.util.Log.e("DEBUG", "connectionStatusText failed", e); }
+        updateConnectionStatus(STATUS_OFFLINE);
+
         try { tabMusic = (LinearLayout) findViewById(R.id.tab_music); } catch (Exception e) { android.util.Log.e("DEBUG", "tab_music failed", e); }
         try { tabSettings = (ScrollView) findViewById(R.id.tab_settings); } catch (Exception e) { android.util.Log.e("DEBUG", "tab_settings failed", e); }
         try { tabPower = (LinearLayout) findViewById(R.id.tab_power); } catch (Exception e) { android.util.Log.e("DEBUG", "tab_power failed", e); }
@@ -587,7 +932,10 @@ public class MainActivity extends Activity {
             (Button) findViewById(R.id.tab_btn_power)
         }; } catch (Exception e) { android.util.Log.e("DEBUG", "tabButtons failed", e); }
 
+        try { musicNowPlayingContainer = (FrameLayout) findViewById(R.id.music_now_playing_container); } catch (Exception e) { android.util.Log.e("DEBUG", "musicNowPlayingContainer failed", e); }
         try { musicNowPlaying = (ScrollView) findViewById(R.id.music_now_playing); } catch (Exception e) { android.util.Log.e("DEBUG", "musicNowPlaying failed", e); }
+        try { npLoadingOverlay = (LinearLayout) findViewById(R.id.np_loading_overlay); } catch (Exception e) { android.util.Log.e("DEBUG", "npLoadingOverlay failed", e); }
+        try { npLoadingText = (TextView) findViewById(R.id.np_loading_text); } catch (Exception e) { android.util.Log.e("DEBUG", "npLoadingText failed", e); }
         try { musicSearch = (LinearLayout) findViewById(R.id.music_search); } catch (Exception e) { android.util.Log.e("DEBUG", "musicSearch failed", e); }
         try { musicLibrary = (ScrollView) findViewById(R.id.music_library); } catch (Exception e) { android.util.Log.e("DEBUG", "musicLibrary failed", e); }
         try { musicQueue = (ScrollView) findViewById(R.id.music_queue); } catch (Exception e) { android.util.Log.e("DEBUG", "musicQueue failed", e); }
@@ -607,24 +955,44 @@ public class MainActivity extends Activity {
         try { npArtist = (TextView) findViewById(R.id.np_artist); } catch (Exception e) { android.util.Log.e("DEBUG", "npArtist failed", e); }
         try { npAlbum = (TextView) findViewById(R.id.np_album); } catch (Exception e) { android.util.Log.e("DEBUG", "npAlbum failed", e); }
         try { volLabel = (TextView) findViewById(R.id.vol_label); } catch (Exception e) { android.util.Log.e("DEBUG", "volLabel failed", e); }
-        try { npArtwork = (ImageView) findViewById(R.id.np_artwork); } catch (Exception e) { android.util.Log.e("DEBUG", "npArtwork failed", e); }
+        try { 
+            npArtwork = (ImageView) findViewById(R.id.np_artwork); 
+            if (npArtwork != null) {
+                boolean pixelPerfect = prefs.getBoolean("pixel_perfect_art", false);
+                npArtwork.setScaleType(pixelPerfect ? ImageView.ScaleType.CENTER : ImageView.ScaleType.FIT_CENTER);
+            }
+        } catch (Exception e) { android.util.Log.e("DEBUG", "npArtwork failed", e); }
         try { npTimeCurrent = (TextView) findViewById(R.id.np_time_current); } catch (Exception e) {}
         try { npTimeTotal = (TextView) findViewById(R.id.np_time_total); } catch (Exception e) {}
         try { 
             npProgress = (SeekBar) findViewById(R.id.np_progress); 
             if (npProgress != null) {
                 npProgress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                    @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {}
-                    @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-                    @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                    @Override
+                    public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                        if (fromUser) {
+                            if (npTimeCurrent != null) {
+                                npTimeCurrent.setText(formatTime(progress));
+                            }
+                            updateLyricsSync(progress * 1000);
+                        }
+                    }
+                    @Override
+                    public void onStartTrackingTouch(SeekBar seekBar) {
+                        isTrackingNpProgress = true;
+                    }
+                    @Override
+                    public void onStopTrackingTouch(SeekBar seekBar) {
+                        isTrackingNpProgress = false;
                         int seekMs = seekBar.getProgress() * 1000;
-                        sendCommand("/api/spotify/seek?ms=" + seekMs + "&type=absolute");
+                        seekTo(seekMs, true);
                     }
                 });
             }
         } catch (Exception e) {}
 
         try { toggleAlbumArt = (ToggleButton) findViewById(R.id.toggle_album_art); } catch (Exception e) { android.util.Log.e("DEBUG", "toggleAlbumArt failed", e); }
+        try { togglePixelPerfectArt = (ToggleButton) findViewById(R.id.toggle_pixel_perfect_art); } catch (Exception e) { android.util.Log.e("DEBUG", "togglePixelPerfectArt failed", e); }
         try { btnTheme = (Button) findViewById(R.id.btn_theme); } catch (Exception e) { android.util.Log.e("DEBUG", "btnTheme failed", e); }
         try { cpuText = (TextView) findViewById(R.id.cpu_text); } catch (Exception e) {}
         try { ramText = (TextView) findViewById(R.id.ram_text); } catch (Exception e) {}
@@ -638,7 +1006,8 @@ public class MainActivity extends Activity {
 
         try { seekBarVolume = (SeekBar) findViewById(R.id.seekBar_volume); } catch (Exception e) { android.util.Log.e("DEBUG", "seekBarVolume failed", e); }
         try { volLabel = (TextView) findViewById(R.id.vol_label); } catch (Exception e) {}    
-        toggleAlbumArt.setChecked(prefs.getBoolean("show_album_art", true));
+        if (toggleAlbumArt != null) toggleAlbumArt.setChecked(prefs.getBoolean("show_album_art", true));
+        if (togglePixelPerfectArt != null) togglePixelPerfectArt.setChecked(prefs.getBoolean("pixel_perfect_art", false));
         
         ((Button) findViewById(R.id.btn_disconnect)).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -646,12 +1015,16 @@ public class MainActivity extends Activity {
                 screenMain.setVisibility(View.GONE);
                 screenConnection.setVisibility(View.VISIBLE);
                 api = null;
+                consecutiveConnectionFailures = 2;
+                updateConnectionStatus(STATUS_OFFLINE);
             }
         });
 
         ((Button) findViewById(R.id.btn_refresh)).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                showNpLoading("Refreshing...");
+                updateConnectionStatus(STATUS_CONNECTING);
                 npTitle.setText("Refreshing...");
                 npArtist.setText("");
                 npAlbum.setText("");
@@ -700,8 +1073,7 @@ public class MainActivity extends Activity {
             if (!ip.isEmpty()) {
                 Button btn = new Button(this);
                 btn.setText(ip);
-                btn.setTextColor(0xFFFFFFFF);
-                btn.setBackgroundColor(0xFF1a1f36);
+                styleDynamicButton(btn);
                 btn.setPadding(15, 15, 15, 15);
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.FILL_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -844,11 +1216,13 @@ public class MainActivity extends Activity {
         prefs.edit().putString("last_ip", ip).commit();
         api = new ApiClient(ip);
         
+        updateConnectionStatus(STATUS_CONNECTING);
         showLoading("Connecting to " + ip + "...");
         api.get("/api/status", new ApiClient.Callback() {
             @Override
             public void onSuccess(String response) {
                 hideLoading();
+                onConnectionSuccess();
                 try {
                     org.json.JSONObject json = new org.json.JSONObject(response);
                     
@@ -877,6 +1251,8 @@ public class MainActivity extends Activity {
             @Override
             public void onError(String error) {
                 hideLoading();
+                consecutiveConnectionFailures = 2;
+                updateConnectionStatus(STATUS_OFFLINE);
                 showToast("Failed to connect", false);
             }
         });
@@ -929,7 +1305,11 @@ public class MainActivity extends Activity {
     }
 
     private void switchMusicSubTab(int index) {
-        musicNowPlaying.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
+        if (musicNowPlayingContainer != null) {
+            musicNowPlayingContainer.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
+        } else if (musicNowPlaying != null) {
+            musicNowPlaying.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
+        }
         musicSearch.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
         musicLibrary.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
         if (musicQueue != null) musicQueue.setVisibility(index == 3 ? View.VISIBLE : View.GONE);
@@ -938,6 +1318,40 @@ public class MainActivity extends Activity {
         for (int i = 0; i < musicSubTabButtons.length; i++) {
             musicSubTabButtons[i].setTextColor(i == index ? 0xFF00d4ff : 0xFF8892b0);
             musicSubTabButtons[i].setBackgroundColor(i == index ? 0xFF1a1f36 : 0xFF111827);
+        }
+        
+        if (index == 0) {
+            showNpLoading("Loading Now Playing...");
+            if (api != null) {
+                api.get("/api/spotify/now_playing", new ApiClient.Callback() {
+                    @Override
+                    public void onSuccess(final String response) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                hideNpLoading();
+                                onConnectionSuccess();
+                                try {
+                                    JSONObject json = new JSONObject(response);
+                                    updateNowPlayingFromJson(json);
+                                } catch (Exception e) {}
+                            }
+                        });
+                    }
+                    @Override
+                    public void onError(final String error) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                hideNpLoading();
+                                onConnectionFailure();
+                            }
+                        });
+                    }
+                });
+            } else {
+                hideNpLoading();
+            }
         }
         
         if (index == 2) {
@@ -960,7 +1374,7 @@ public class MainActivity extends Activity {
         }
         
         if (index == 4) {
-            fetchLyrics(npTitle.getText().toString(), npArtist.getText().toString());
+            refreshLyricsOnOpen();
         }
     }
 
@@ -975,10 +1389,10 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { sendCommand("/api/command/spotify_prev"); }
         });
         ((Button) findViewById(R.id.btn_seek_fwd)).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendCommand("/api/spotify/seek?ms=15000"); }
+            @Override public void onClick(View v) { seekTo(15000, false); }
         });
         ((Button) findViewById(R.id.btn_seek_back)).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendCommand("/api/spotify/seek?ms=-15000"); }
+            @Override public void onClick(View v) { seekTo(-15000, false); }
         });
         final Button btnNpLike = (Button) findViewById(R.id.btn_np_like);
         if (btnNpLike != null) {
@@ -1169,8 +1583,7 @@ public class MainActivity extends Activity {
                     retryBtn.setText("Retry");
                     retryBtn.setTextSize(10);
                     retryBtn.setPadding(2, 2, 2, 2);
-                    retryBtn.setTextColor(0xFFFFFFFF);
-                    retryBtn.setBackgroundColor(0x44FFFFFF);
+                    styleDynamicButton(retryBtn);
                     errLayout.addView(retryBtn);
                     
                     artContainer.addView(errLayout);
@@ -1278,6 +1691,7 @@ public class MainActivity extends Activity {
                     
                     Button playBtn = new Button(MainActivity.this);
                     playBtn.setText("Play");
+                    styleDynamicButton(playBtn);
                     playBtn.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) { sendCommand("/api/spotify/play?uri=" + java.net.URLEncoder.encode(uri)); }
                     });
@@ -1285,6 +1699,7 @@ public class MainActivity extends Activity {
                     
                     Button queueBtn = new Button(MainActivity.this);
                     queueBtn.setText("Queue");
+                    styleDynamicButton(queueBtn);
                     queueBtn.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) { sendCommand("/api/spotify/queue/add?uri=" + java.net.URLEncoder.encode(uri)); }
                     });
@@ -1296,6 +1711,7 @@ public class MainActivity extends Activity {
                     } else {
                         likeBtn.setText("Like");
                     }
+                    styleDynamicButton(likeBtn);
                     likeBtn.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) { sendCommand("/api/spotify/library/add?uri=" + java.net.URLEncoder.encode(uri)); }
                     });
@@ -1304,6 +1720,7 @@ public class MainActivity extends Activity {
                     if (type.equals("track")) {
                         Button playlistBtn = new Button(MainActivity.this);
                         playlistBtn.setText("Add to Playlist");
+                        styleDynamicButton(playlistBtn);
                         playlistBtn.setOnClickListener(new View.OnClickListener() {
                             @Override public void onClick(View v) { showPlaylistSelector(uri); }
                         });
@@ -1386,6 +1803,7 @@ public class MainActivity extends Activity {
         }
         likedBtn.setTextSize(20);
         likedBtn.setPadding(20, 40, 20, 40);
+        styleDynamicButton(likedBtn);
         likedBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 sendCommand("/api/spotify/play?uri=spotify:collection:tracks");
@@ -1450,8 +1868,7 @@ public class MainActivity extends Activity {
                     retryBtn.setText("Retry");
                     retryBtn.setTextSize(10);
                     retryBtn.setPadding(2, 2, 2, 2);
-                    retryBtn.setTextColor(0xFFFFFFFF);
-                    retryBtn.setBackgroundColor(0x44FFFFFF);
+                    styleDynamicButton(retryBtn);
                     errLayout.addView(retryBtn);
                     
                     artContainer.addView(errLayout);
@@ -1573,6 +1990,7 @@ public class MainActivity extends Activity {
                 if (type.equals("folder")) {
                     Button openBtn = new Button(MainActivity.this);
                     openBtn.setText(expandedFolders.contains(uri) ? "Close folder" : "Open folder");
+                    styleDynamicButton(openBtn);
                     openBtn.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) {
                             if (expandedFolders.contains(uri)) expandedFolders.remove(uri);
@@ -1586,6 +2004,7 @@ public class MainActivity extends Activity {
                 if (!uri.isEmpty()) {
                     Button playBtn = new Button(MainActivity.this);
                     playBtn.setText("Play");
+                    styleDynamicButton(playBtn);
                     playBtn.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) {
                             sendCommand("/api/spotify/play?uri=" + java.net.URLEncoder.encode(uri));
@@ -1595,6 +2014,7 @@ public class MainActivity extends Activity {
                     
                     Button removeBtn = new Button(MainActivity.this);
                     removeBtn.setText("Remove from library");
+                    styleDynamicButton(removeBtn);
                     removeBtn.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) {
                             api.get("/api/spotify/library/remove?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
@@ -1673,8 +2093,7 @@ public class MainActivity extends Activity {
                                 retryBtn.setText("Retry");
                                 retryBtn.setTextSize(10);
                                 retryBtn.setPadding(2, 2, 2, 2);
-                                retryBtn.setTextColor(0xFFFFFFFF);
-                                retryBtn.setBackgroundColor(0x44FFFFFF);
+                                styleDynamicButton(retryBtn);
                                 errLayout.addView(retryBtn);
                                 
                                 artContainer.addView(errLayout);
@@ -1770,8 +2189,8 @@ public class MainActivity extends Activity {
                             if (!uri.isEmpty()) {
                                 Button btnPlay = new Button(MainActivity.this);
                                 btnPlay.setText("Play");
-                                btnPlay.setTextColor(0xFFffffff);
                                 btnPlay.setPadding(20, 10, 20, 10);
+                                styleDynamicButton(btnPlay);
                                 btnPlay.setOnClickListener(new View.OnClickListener() {
                                     @Override public void onClick(View v) {
                                         sendCommand("/api/spotify/play?uri=" + java.net.URLEncoder.encode(uri));
@@ -1807,32 +2226,60 @@ public class MainActivity extends Activity {
     private void setupSettings() {
         try {
             final android.widget.ToggleButton toggleAlbumArt = (android.widget.ToggleButton) findViewById(R.id.toggle_album_art);
-            toggleAlbumArt.setChecked(prefs.getBoolean("show_album_art", true));
-            toggleAlbumArt.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
-                @Override public void onCheckedChanged(android.widget.CompoundButton buttonView, boolean isChecked) {
-                    prefs.edit().putBoolean("show_album_art", isChecked).apply();
-                    api.get("/api/config/set?key=show_album_art&value=" + isChecked, new ApiClient.Callback() {
-                        @Override public void onSuccess(String response) {}
-                        @Override public void onError(String error) {}
-                    });
-                }
-            });
+            if (toggleAlbumArt != null) {
+                toggleAlbumArt.setChecked(prefs.getBoolean("show_album_art", true));
+                toggleAlbumArt.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+                    @Override public void onCheckedChanged(android.widget.CompoundButton buttonView, boolean isChecked) {
+                        prefs.edit().putBoolean("show_album_art", isChecked).apply();
+                        if (api != null) {
+                            api.get("/api/config/set?key=show_album_art&value=" + isChecked, new ApiClient.Callback() {
+                                @Override public void onSuccess(String response) {}
+                                @Override public void onError(String error) {}
+                            });
+                        }
+                    }
+                });
+            }
+
+            final android.widget.ToggleButton togglePixelPerfectArt = (android.widget.ToggleButton) findViewById(R.id.toggle_pixel_perfect_art);
+            if (togglePixelPerfectArt != null) {
+                togglePixelPerfectArt.setChecked(prefs.getBoolean("pixel_perfect_art", false));
+                togglePixelPerfectArt.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+                    @Override public void onCheckedChanged(android.widget.CompoundButton buttonView, boolean isChecked) {
+                        prefs.edit().putBoolean("pixel_perfect_art", isChecked).apply();
+                        if (npArtwork != null) {
+                            npArtwork.setScaleType(isChecked ? ImageView.ScaleType.CENTER : ImageView.ScaleType.FIT_CENTER);
+                            npArtwork.invalidate();
+                        }
+                        if (api != null) {
+                            api.get("/api/config/set?key=pixel_perfect_art&value=" + isChecked, new ApiClient.Callback() {
+                                @Override public void onSuccess(String response) {}
+                                @Override public void onError(String error) {}
+                            });
+                        }
+                    }
+                });
+            }
 
             final Button btnTheme = (Button) findViewById(R.id.btn_theme);
-            btnTheme.setText(prefs.getString("theme", "dark").substring(0, 1).toUpperCase() + prefs.getString("theme", "dark").substring(1));
-            btnTheme.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    String cur = prefs.getString("theme", "dark");
-                    String next = cur.equals("dark") ? "light" : (cur.equals("light") ? "native" : "dark");
-                    prefs.edit().putString("theme", next).apply();
-                    btnTheme.setText(next.substring(0, 1).toUpperCase() + next.substring(1));
-                    applyTheme(next);
-                    api.get("/api/config/set?key=theme&value=" + next, new ApiClient.Callback() {
-                        @Override public void onSuccess(String response) {}
-                        @Override public void onError(String error) {}
-                    });
-                }
-            });
+            if (btnTheme != null) {
+                btnTheme.setText(prefs.getString("theme", "dark").substring(0, 1).toUpperCase() + prefs.getString("theme", "dark").substring(1));
+                btnTheme.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        String cur = prefs.getString("theme", "dark");
+                        String next = cur.equals("dark") ? "light" : (cur.equals("light") ? "native" : "dark");
+                        prefs.edit().putString("theme", next).apply();
+                        btnTheme.setText(next.substring(0, 1).toUpperCase() + next.substring(1));
+                        applyTheme(next);
+                        if (api != null) {
+                            api.get("/api/config/set?key=theme&value=" + next, new ApiClient.Callback() {
+                                @Override public void onSuccess(String response) {}
+                                @Override public void onError(String error) {}
+                            });
+                        }
+                    }
+                });
+            }
         } catch (Exception e) {}
     }
 
@@ -1869,14 +2316,17 @@ public class MainActivity extends Activity {
         if (tabPower != null) tabPower.setBackgroundColor(bgPrimary);
         
         // Find all views and update them
-        applyThemeToView(root, bgPrimary, bgSecondary, textPrimary, textSecondary, theme.equals("native"));
+        applyThemeToView(root, bgPrimary, bgSecondary, textPrimary, textSecondary, theme);
         
         // Restore tab highlights manually to avoid triggering loadLibrary() loops
         int currentMainTab = (tabMusic != null && tabMusic.getVisibility() == View.VISIBLE) ? 0 : 
                              (tabSettings != null && tabSettings.getVisibility() == View.VISIBLE) ? 1 : 2;
         if (tabButtons != null) {
             for (int i = 0; i < tabButtons.length; i++) {
-                if (tabButtons[i] != null) tabButtons[i].setTextColor(i == currentMainTab ? 0xFF00d4ff : 0xFF8892b0);
+                if (tabButtons[i] != null) {
+                    tabButtons[i].setTextColor(i == currentMainTab ? 0xFF00d4ff : 0xFF8892b0);
+                    tabButtons[i].setBackgroundColor(i == currentMainTab ? 0xFF1a1f36 : 0xFF111827);
+                }
             }
         }
         
@@ -1896,22 +2346,39 @@ public class MainActivity extends Activity {
         }
     }
     
-    private void applyThemeToView(View v, int bgP, int bgS, int textP, int textS, boolean isNative) {
+    private void applyThemeToView(View v, int bgP, int bgS, int textP, int textS, String theme) {
         if (v == null) return;
         
         int id = v.getId();
-        if (id == R.id.lyrics_content || id == R.id.library_content || id == R.id.search_results || id == R.id.queue_content) {
+        if (id == R.id.lyrics_content || id == R.id.library_content || id == R.id.search_results || id == R.id.queue_content ||
+            id == R.id.connection_status_container || id == R.id.connection_status_dot || id == R.id.connection_status_text ||
+            id == R.id.np_loading_overlay || id == R.id.np_loading_text) {
             return;
         }
 
         if (v instanceof ToggleButton) {
+            ToggleButton tb = (ToggleButton) v;
+            if ("native".equals(theme)) {
+                tb.setBackgroundResource(android.R.drawable.btn_default);
+                tb.setTextColor(android.graphics.Color.BLACK);
+            } else if ("light".equals(theme)) {
+                tb.setBackgroundResource(android.R.drawable.btn_default);
+                tb.setTextColor(android.graphics.Color.parseColor("#1a1a2e"));
+            } else {
+                tb.setBackgroundResource(R.drawable.btn_toggle_dark);
+                try {
+                    tb.setTextColor(getResources().getColorStateList(R.color.toggle_dark_text));
+                } catch (Exception e) {
+                    tb.setTextColor(android.graphics.Color.WHITE);
+                }
+            }
             return;
         }
         
         if (v instanceof ViewGroup) {
             ViewGroup vg = (ViewGroup) v;
             for (int i = 0; i < vg.getChildCount(); i++) {
-                applyThemeToView(vg.getChildAt(i), bgP, bgS, textP, textS, isNative);
+                applyThemeToView(vg.getChildAt(i), bgP, bgS, textP, textS, theme);
             }
         }
         
@@ -1921,55 +2388,58 @@ public class MainActivity extends Activity {
         
         if (v instanceof Button) {
             Button b = (Button) v;
-            if (isNative) {
+            if ("native".equals(theme)) {
                 b.setBackgroundResource(android.R.drawable.btn_default);
                 b.setTextColor(android.graphics.Color.BLACK);
-            } else {
-                int defaultColor = bgS;
+            } else if ("light".equals(theme)) {
                 if (b.getId() == R.id.btn_play_pause) {
-                    defaultColor = android.graphics.Color.parseColor("#00d4ff");
+                    b.setBackgroundColor(android.graphics.Color.parseColor("#00d4ff"));
                     b.setTextColor(android.graphics.Color.WHITE);
-                } else if (b.getId() == R.id.btn_disconnect) {
-                    defaultColor = android.graphics.Color.parseColor("#1a1f36");
-                    b.setTextColor(android.graphics.Color.parseColor("#ff5252"));
                 } else if (b.getId() == R.id.btn_shutdown) {
-                    defaultColor = android.graphics.Color.parseColor("#ff5252");
+                    b.setBackgroundColor(android.graphics.Color.parseColor("#ff5252"));
                     b.setTextColor(android.graphics.Color.WHITE);
                 } else if (b.getId() == R.id.btn_restart) {
-                    defaultColor = android.graphics.Color.parseColor("#ffa726");
+                    b.setBackgroundColor(android.graphics.Color.parseColor("#ffa726"));
                     b.setTextColor(android.graphics.Color.WHITE);
-                } else if (b.getId() == R.id.btn_close_app) {
-                    defaultColor = android.graphics.Color.parseColor("#1a1f36");
-                    b.setTextColor(android.graphics.Color.WHITE);
+                } else if (b.getId() == R.id.btn_disconnect) {
+                    b.setBackgroundResource(android.R.drawable.btn_default);
+                    b.setTextColor(android.graphics.Color.parseColor("#ff5252"));
                 } else {
-                    b.setTextColor(textP);
+                    b.setBackgroundResource(android.R.drawable.btn_default);
+                    b.setTextColor(android.graphics.Color.parseColor("#1a1a2e"));
                 }
-                
-                android.graphics.drawable.StateListDrawable sld = new android.graphics.drawable.StateListDrawable();
-                android.graphics.drawable.ColorDrawable pressed = new android.graphics.drawable.ColorDrawable(android.graphics.Color.GRAY);
-                android.graphics.drawable.ColorDrawable normal = new android.graphics.drawable.ColorDrawable(defaultColor);
-                sld.addState(new int[]{android.R.attr.state_pressed}, pressed);
-                sld.addState(new int[]{android.R.attr.state_enabled}, normal);
-                sld.addState(new int[]{}, normal);
-                int pL = 20;
-                int pT = 10;
-                int pR = 20;
-                int pB = 10;
-                
-                if (b.getId() == R.id.btn_seek_back || b.getId() == R.id.btn_seek_fwd || 
-                    b.getId() == R.id.btn_vol_down || b.getId() == R.id.btn_vol_up) {
-                    pL = 5; pR = 5;
+            } else {
+                // Dark theme
+                if (b.getId() == R.id.btn_play_pause) {
+                    b.setBackgroundColor(android.graphics.Color.parseColor("#00d4ff"));
+                    b.setTextColor(android.graphics.Color.WHITE);
+                } else if (b.getId() == R.id.btn_shutdown) {
+                    b.setBackgroundColor(android.graphics.Color.parseColor("#ff5252"));
+                    b.setTextColor(android.graphics.Color.WHITE);
+                } else if (b.getId() == R.id.btn_restart) {
+                    b.setBackgroundColor(android.graphics.Color.parseColor("#ffa726"));
+                    b.setTextColor(android.graphics.Color.WHITE);
+                } else if (b.getId() == R.id.btn_disconnect) {
+                    b.setBackgroundResource(R.drawable.btn_dark);
+                    b.setTextColor(android.graphics.Color.parseColor("#ff5252"));
+                } else if (b.getId() == R.id.btn_add_pc) {
+                    b.setBackgroundResource(R.drawable.btn_dark);
+                    b.setTextColor(android.graphics.Color.parseColor("#00d4ff"));
+                } else if (b.getId() == R.id.btn_remove_pc) {
+                    b.setBackgroundResource(R.drawable.btn_dark);
+                    b.setTextColor(android.graphics.Color.parseColor("#ff3333"));
+                } else {
+                    b.setBackgroundResource(R.drawable.btn_dark);
+                    try {
+                        b.setTextColor(getResources().getColorStateList(R.color.btn_dark_text));
+                    } catch (Exception e) {
+                        b.setTextColor(android.graphics.Color.WHITE);
+                    }
                 }
-                
-                android.util.Log.d("MEDIACENTRE_THEME", "Set padding " + pL + " for btn id: " + b.getId());
-                b.setBackgroundDrawable(sld);
-                // Fix for legacy Android StateListDrawable initialization
-                sld.setState(new int[]{android.R.attr.state_enabled});
-                b.setPadding(pL, pT, pR, pB);
             }
         } else if (v instanceof EditText) {
             EditText e = (EditText) v;
-            if (isNative) {
+            if ("native".equals(theme)) {
                 e.setBackgroundResource(android.R.drawable.edit_text);
                 e.setTextColor(android.graphics.Color.BLACK);
             } else {
@@ -2103,6 +2573,11 @@ public class MainActivity extends Activity {
         if (uri.equals(lastArtUri)) return;
         lastArtUri = uri;
         
+        final boolean pixelPerfect = prefs.getBoolean("pixel_perfect_art", false);
+        if (npArtwork != null) {
+            npArtwork.setScaleType(pixelPerfect ? ImageView.ScaleType.CENTER : ImageView.ScaleType.FIT_CENTER);
+        }
+
         final ProgressBar npArtProgress = (ProgressBar) findViewById(R.id.np_art_progress);
         final LinearLayout npArtErrorLayout = (LinearLayout) findViewById(R.id.np_art_error_layout);
         final TextView npArtErrorText = (TextView) findViewById(R.id.np_art_error_text);
@@ -2151,7 +2626,7 @@ public class MainActivity extends Activity {
                         new AsyncTask<Void, Void, Bitmap>() {
                             @Override protected Bitmap doInBackground(Void... voids) {
                                 byte[] data = downloadUrlToBytes(imgUrl);
-                                return decodeSampledBitmapFromBytes(data, 500, 500);
+                                return decodeSampledBitmapFromBytes(data, 500, 500, pixelPerfect);
                             }
                             @Override protected void onPostExecute(Bitmap b) {
                                 if (b != null) {
@@ -2186,7 +2661,7 @@ public class MainActivity extends Activity {
                     new AsyncTask<Void, Void, Bitmap>() {
                         @Override protected Bitmap doInBackground(Void... voids) {
                             byte[] data = downloadUrlToBytes(highResUrl);
-                            return decodeSampledBitmapFromBytes(data, 500, 500);
+                            return decodeSampledBitmapFromBytes(data, 500, 500, pixelPerfect);
                         }
                         @Override protected void onPostExecute(Bitmap hb) {
                             if (hb != null) {
@@ -2268,7 +2743,9 @@ public class MainActivity extends Activity {
     }
 
     private void fetchLyrics(final String track, final String artist) {
-        if (track.isEmpty() || artist.isEmpty() || track.equals("Advertisement")) {
+        if (track == null || track.isEmpty() || artist == null || artist.isEmpty() || 
+            track.equals("Advertisement") || track.equals("Not Playing") || 
+            track.equals("Refreshing...") || track.equals("Spotify")) {
             currentLyricsTrack = "";
             currentLyrics.clear();
             currentLyricLineIndex = -1;
@@ -2285,6 +2762,16 @@ public class MainActivity extends Activity {
         currentLyricLineIndex = -1;
         if (lyricsContent != null) {
             clearContainerViews(lyricsContent);
+            TextView loadingTv = new TextView(MainActivity.this);
+            loadingTv.setText("Loading lyrics for \"" + track + "\"...");
+            loadingTv.setTextColor(0xFF8892b0);
+            loadingTv.setTextSize(18);
+            loadingTv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+            loadingTv.setPadding(0, 40, 0, 0);
+            lyricsContent.addView(loadingTv);
+        }
+        if (api == null) {
+            return;
         }
         showLoading("Loading Lyrics...");
 
@@ -2306,6 +2793,8 @@ public class MainActivity extends Activity {
                                     error.setText(errMsg);
                                     error.setTextColor(0xFF8892b0);
                                     error.setTextSize(18);
+                                    error.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                                    error.setPadding(0, 40, 0, 0);
                                     lyricsContent.addView(error);
                                 }
                             }
@@ -2315,6 +2804,21 @@ public class MainActivity extends Activity {
                     
                     JSONObject data = json.optJSONObject("data");
                     if (data == null) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (lyricsContent != null) {
+                                    clearContainerViews(lyricsContent);
+                                    TextView error = new TextView(MainActivity.this);
+                                    error.setText("No lyrics found.");
+                                    error.setTextColor(0xFF8892b0);
+                                    error.setTextSize(18);
+                                    error.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                                    error.setPadding(0, 40, 0, 0);
+                                    lyricsContent.addView(error);
+                                }
+                            }
+                        });
                         return;
                     }
                     JSONArray timedLyrics = data.optJSONArray("timed_lyrics");
@@ -2342,6 +2846,8 @@ public class MainActivity extends Activity {
                                         error.setText("No lyrics found.");
                                         error.setTextColor(0xFF8892b0);
                                         error.setTextSize(18);
+                                        error.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                                        error.setPadding(0, 40, 0, 0);
                                         lyricsContent.addView(error);
                                     }
                                 }
@@ -2373,13 +2879,14 @@ public class MainActivity extends Activity {
                                         errMsg = json.optString("message", errMsg);
                                     }
                                 } catch (Exception e) {
-                                    // Not JSON
                                     errMsg = error;
                                 }
                             }
                             errView.setText(errMsg);
                             errView.setTextColor(0xFF8892b0);
                             errView.setTextSize(18);
+                            errView.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                            errView.setPadding(0, 40, 0, 0);
                             lyricsContent.addView(errView);
                         }
                     }
@@ -2437,7 +2944,7 @@ public class MainActivity extends Activity {
                             public void onClick(View v) {
                                 int ms = currentLyrics.get(index).timeMs;
                                 if (ms >= 0) {
-                                    sendCommand("/api/spotify/seek?ms=" + ms + "&type=absolute");
+                                    seekTo(ms, true);
                                 }
                             }
                         });
@@ -2454,11 +2961,15 @@ public class MainActivity extends Activity {
         if (currentLyrics.isEmpty() || lyricsContent == null || musicLyrics == null || musicLyrics.getVisibility() != View.VISIBLE) {
             return;
         }
+        if (currentLyrics.get(0).timeMs < 0) {
+            return;
+        }
         int newIndex = -1;
         for (int i = 0; i < currentLyrics.size(); i++) {
-            if (positionMs >= currentLyrics.get(i).timeMs) {
+            int lineTime = currentLyrics.get(i).timeMs;
+            if (lineTime >= 0 && positionMs >= lineTime) {
                 newIndex = i;
-            } else {
+            } else if (lineTime >= 0 && positionMs < lineTime) {
                 break;
             }
         }

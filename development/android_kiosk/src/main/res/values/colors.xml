@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Background & Surface Palette -->
+    <color name="bg_primary">#0a0e1a</color>
+    <color name="bg_secondary">#111827</color>
+    <color name="bg_card">#1a1f36</color>
+    <color name="bg_card_pressed">#2d3748</color>
+    <color name="bg_card_focused">#3b4261</color>
+    <color name="bg_card_stroke">#2d3748</color>
+
+    <!-- Dark Button Palette -->
+    <color name="btn_dark_normal">#1a1f36</color>
+    <color name="btn_dark_pressed">#2d3748</color>
+    <color name="btn_dark_focused">#3b4261</color>
+    <color name="btn_dark_disabled">#121624</color>
+    <color name="btn_dark_stroke">#2d3748</color>
+    <color name="btn_dark_stroke_focused">#00d4ff</color>
+
+    <!-- Toggle Button Palette -->
+    <color name="toggle_dark_checked">#133854</color>
+    <color name="toggle_dark_checked_pressed">#00a3cc</color>
+    <color name="toggle_dark_checked_stroke">#00d4ff</color>
+    <color name="toggle_dark_unchecked">#1a1f36</color>
+    <color name="toggle_dark_unchecked_pressed">#2d3748</color>
+    <color name="toggle_dark_unchecked_stroke">#2d3748</color>
+
+    <!-- Accent & Status Palette -->
+    <color name="status_online">#00e676</color>
+    <color name="status_connecting">#ffa726</color>
+    <color name="status_offline">#ff5252</color>
+    <color name="accent_cyan">#00d4ff</color>
+    <color name="accent_cyan_pressed">#00a3cc</color>
+    <color name="accent_red">#ff5252</color>
+    <color name="accent_orange">#ffa726</color>
+    <color name="accent_green">#00FFaa</color>
+
+    <!-- Text Palette -->
+    <color name="text_primary">#ffffff</color>
+    <color name="text_secondary">#8892b0</color>
+    <color name="text_disabled">#555e75</color>
+    <color name="text_hint">#8892b0</color>
+</resources>
