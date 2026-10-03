@@ -333,7 +333,7 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 self._json_response(200, {"volume": -1})
             return
 
-        if path.startswith("/api/volume/set"):
+        if path == "/api/volume/set":
             try:
                 from urllib.parse import urlparse, parse_qs
                 from backend.system_control import SystemControl
@@ -354,9 +354,77 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 self._json_response(500, {"error": str(e)})
             return
 
-        # API: system actions
+        if path == "/api/volume/mixer":
+            try:
+                from backend.system_control import SystemControl
+                self._json_response(200, SystemControl.get_mixer())
+            except Exception as e:
+                self._json_response(500, {"error": str(e)})
+            return
+
+        if path == "/api/volume/app/set":
+            try:
+                from urllib.parse import urlparse, parse_qs
+                from backend.system_control import SystemControl
+                qs = parse_qs(urlparse(self.path).query)
+                key = qs.get("key", [""])[0]
+                vol_str = qs.get("vol", [""])[0]
+                if key and vol_str.isdigit():
+                    SystemControl.set_app_volume(key, int(vol_str))
+                    self._json_response(200, {"ok": True})
+                else:
+                    self._json_response(400, {"error": "Invalid app volume params"})
+            except Exception as e:
+                self._json_response(500, {"error": str(e)})
+            return
+
+        if path == "/api/audio/devices":
+            try:
+                from backend.system_control import SystemControl
+                self._json_response(200, {"devices": SystemControl.get_output_devices()})
+            except Exception as e:
+                self._json_response(500, {"error": str(e)})
+            return
+
+        if path == "/api/audio/device/set":
+            try:
+                from urllib.parse import urlparse, parse_qs
+                from backend.system_control import SystemControl
+                device_id = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+                if device_id:
+                    ok = SystemControl.set_output_device(device_id)
+                    self._json_response(200, {"ok": ok})
+                else:
+                    self._json_response(400, {"error": "Missing device id"})
+            except Exception as e:
+                self._json_response(500, {"error": str(e)})
+            return
+
         if path.startswith("/api/system/"):
             action = path.split("/api/system/", 1)[1].split("?")[0]
+            if action == "tablet_update_check":
+                try:
+                    from urllib.parse import urlparse, parse_qs
+                    from backend.tablet_updater import check_for_update
+                    qs = parse_qs(urlparse(self.path).query)
+                    version = qs.get("version", [""])[0]
+                    self._json_response(200, check_for_update(version))
+                except Exception as e:
+                    self._json_response(500, {"error": str(e)})
+                return
+            elif action == "tablet_update_install":
+                try:
+                    from urllib.parse import urlparse, parse_qs
+                    from backend.tablet_updater import trigger_install
+                    qs = parse_qs(urlparse(self.path).query)
+                    version = qs.get("version", [""])[0]
+                    client_ip = self.client_address[0]
+                    trigger_install(client_ip, version)
+                    self._json_response(200, {"ok": True})
+                except Exception as e:
+                    self._json_response(500, {"error": str(e)})
+                return
+            
             try:
                 from backend.system_control import SystemControl
                 if action == "shutdown":
@@ -369,6 +437,10 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                     self._json_response(200, {"ok": True})
                     import os
                     os._exit(0)
+                elif action == "spotify_reinstall":
+                    self._json_response(200, {"ok": True})
+                    import threading
+                    threading.Thread(target=SystemControl.reinstall_spotify, daemon=True).start()
                 elif action == "stats":
                     res = SystemControl.get_system_stats()
                     res['disk'] = SystemControl.get_disk_usage()

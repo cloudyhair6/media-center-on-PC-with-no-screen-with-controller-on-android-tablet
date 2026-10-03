@@ -33,8 +33,8 @@ public class ApiClient {
                     conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("GET");
                     conn.setUseCaches(false);
-                    conn.setConnectTimeout(5000);
-                    conn.setReadTimeout(5000);
+                    conn.setConnectTimeout(30000);
+                    conn.setReadTimeout(30000);
                     
                     int code = conn.getResponseCode();
                     is = code >= 400 ? conn.getErrorStream() : conn.getInputStream();

@@ -11,6 +11,36 @@ def _get_volume_interface():
     return speakers.EndpointVolume
 
 
+def _get_policy_config():
+    """Get the IPolicyConfig COM interface to set the default audio endpoint."""
+    from ctypes import cast, POINTER, HRESULT, c_wchar_p
+    from comtypes import GUID, IUnknown, COMMETHOD, CoCreateInstance
+    import pythoncom
+    
+    # IPolicyConfig has several versions. This one (IPolicyConfigVista) works well for setting defaults.
+    # IPolicyConfig interface ID: 87CE5498-68D6-44E5-9215-6DA47EF883D8
+    class IPolicyConfig(IUnknown):
+        _iid_ = GUID("{87CE5498-68D6-44E5-9215-6DA47EF883D8}")
+        _methods_ = [
+            COMMETHOD([], HRESULT, 'GetMixFormat', (['in'], c_wchar_p, 'pwstrId'), (['out'], POINTER(c_wchar_p), 'ppFormat')),
+            COMMETHOD([], HRESULT, 'GetDeviceFormat', (['in'], c_wchar_p, 'pwstrId'), (['in'], c_wchar_p, 'bDefault'), (['out'], POINTER(c_wchar_p), 'ppFormat')),
+            COMMETHOD([], HRESULT, 'ResetDeviceFormat', (['in'], c_wchar_p, 'pwstrId')),
+            COMMETHOD([], HRESULT, 'SetDeviceFormat', (['in'], c_wchar_p, 'pwstrId'), (['in'], POINTER(c_wchar_p), 'pEndpointFormat'), (['in'], POINTER(c_wchar_p), 'pMixFormat')),
+            COMMETHOD([], HRESULT, 'GetProcessingPeriod', (['in'], c_wchar_p, 'pwstrId'), (['in'], c_wchar_p, 'bDefault'), (['out'], POINTER(c_wchar_p), 'pmftDefaultPeriod'), (['out'], POINTER(c_wchar_p), 'pmftMinimumPeriod')),
+            COMMETHOD([], HRESULT, 'SetProcessingPeriod', (['in'], c_wchar_p, 'pwstrId'), (['in'], POINTER(c_wchar_p), 'pmftPeriod')),
+            COMMETHOD([], HRESULT, 'GetShareMode', (['in'], c_wchar_p, 'pwstrId'), (['out'], POINTER(c_wchar_p), 'pMode')),
+            COMMETHOD([], HRESULT, 'SetShareMode', (['in'], c_wchar_p, 'pwstrId'), (['in'], POINTER(c_wchar_p), 'mode')),
+            COMMETHOD([], HRESULT, 'GetPropertyValue', (['in'], c_wchar_p, 'pwstrId'), (['in'], c_wchar_p, 'bFxStore'), (['in'], POINTER(c_wchar_p), 'key'), (['out'], POINTER(c_wchar_p), 'pv')),
+            COMMETHOD([], HRESULT, 'SetPropertyValue', (['in'], c_wchar_p, 'pwstrId'), (['in'], c_wchar_p, 'bFxStore'), (['in'], POINTER(c_wchar_p), 'key'), (['in'], POINTER(c_wchar_p), 'pv')),
+            COMMETHOD([], HRESULT, 'SetDefaultEndpoint', (['in'], c_wchar_p, 'pwstrId'), (['in'], c_wchar_p, 'role')),
+            COMMETHOD([], HRESULT, 'SetEndpointVisibility', (['in'], c_wchar_p, 'pwstrId'), (['in'], c_wchar_p, 'bVisible'))
+        ]
+    
+    pythoncom.CoInitialize()
+    # CLSID_PolicyConfig: 870AF99C-171D-4F9E-AF0D-E63DF40C2BC9
+    return CoCreateInstance(GUID("{870AF99C-171D-4F9E-AF0D-E63DF40C2BC9}"), IPolicyConfig, pythoncom.CLSCTX_ALL)
+
+
 class SystemControl:
     """Provides static methods to control Windows system settings."""
 
@@ -26,28 +56,146 @@ class SystemControl:
 
     @staticmethod
     def set_volume(value: int) -> None:
-        """Set system volume and individual application volumes (HDMI bypass)."""
+        """Set the Windows master (main) volume only.
+
+        Per-app levels in the volume mixer are left untouched; use
+        set_app_volume() to change those individually.
+        """
         clamped = max(0, min(100, value))
         vol_float = clamped / 100.0
         try:
-            # 1. Try to set Windows Master Volume
             volume = _get_volume_interface()
             volume.SetMasterVolumeLevelScalar(vol_float, None)
         except Exception as e:
             print(f"Failed to set master volume: {e}")
-            
+
+    # ------------------------------------------------------------------
+    # Volume mixer (per-app volume)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _session_key(session) -> tuple[str, str]:
+        """Return (key, display_name) for an audio session.
+
+        Apps can own several sessions (e.g. browsers), so sessions are grouped
+        by executable name and changed together.
+        """
+        proc = getattr(session, "Process", None)
+        if proc is None:
+            return "__system__", "System Sounds"
         try:
-            # 2. Set individual application volumes (bypasses HDMI master volume lock)
+            exe = proc.name()
+        except Exception:
+            exe = f"pid{getattr(session, 'ProcessId', 0)}"
+        name = exe[:-4] if exe.lower().endswith(".exe") else exe
+        return exe.lower(), (name[:1].upper() + name[1:]) if name else exe
+
+    @staticmethod
+    def get_mixer() -> dict:
+        """List per-app volumes for the current output device."""
+        apps: dict[str, dict] = {}
+        try:
             import pythoncom
             pythoncom.CoInitialize()
             from pycaw.pycaw import AudioUtilities
-            sessions = AudioUtilities.GetAllSessions()
-            for session in sessions:
+            for session in AudioUtilities.GetAllSessions():
+                vol = session.SimpleAudioVolume
+                if not vol:
+                    continue
+                key, display = SystemControl._session_key(session)
+                if key in apps:
+                    continue
+                apps[key] = {
+                    "key": key,
+                    "name": display,
+                    "volume": int(round(vol.GetMasterVolume() * 100)),
+                    "muted": bool(vol.GetMute()),
+                }
+        except Exception as e:
+            print(f"Failed to read volume mixer: {e}")
+        ordered = sorted(apps.values(), key=lambda a: (a["key"] != "__system__", a["name"].lower()))
+        return {"master": SystemControl.get_volume(), "apps": ordered}
+
+    @staticmethod
+    def set_app_volume(key: str, value: int) -> bool:
+        """Set the volume of every session belonging to one app (0-100)."""
+        vol_float = max(0, min(100, value)) / 100.0
+        changed = False
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            from pycaw.pycaw import AudioUtilities
+            for session in AudioUtilities.GetAllSessions():
+                vol = session.SimpleAudioVolume
+                if vol and SystemControl._session_key(session)[0] == key:
+                    vol.SetMasterVolume(vol_float, None)
+                    changed = True
+        except Exception as e:
+            print(f"Failed to set app volume: {e}")
+        return changed
+
+    @staticmethod
+    def reset_app_volumes() -> int:
+        """Put every app in the mixer back to 100%. Returns sessions changed."""
+        count = 0
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            from pycaw.pycaw import AudioUtilities
+            for session in AudioUtilities.GetAllSessions():
                 vol = session.SimpleAudioVolume
                 if vol:
-                    vol.SetMasterVolume(vol_float, None)
+                    vol.SetMasterVolume(1.0, None)
+                    count += 1
         except Exception as e:
-            print(f"Failed to set application volumes: {e}")
+            print(f"Failed to reset app volumes: {e}")
+        return count
+
+    # ------------------------------------------------------------------
+    # Sound output device
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_output_devices() -> list[dict]:
+        """List active playback devices and which one is the default."""
+        devices = []
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            from pycaw.pycaw import AudioUtilities
+            enumerator = AudioUtilities.GetDeviceEnumerator()
+            default_id = ""
+            try:
+                # eRender=0, eMultimedia=1
+                default_id = enumerator.GetDefaultAudioEndpoint(0, 1).GetId()
+            except Exception:
+                pass
+            # eRender=0, DEVICE_STATE_ACTIVE=1
+            collection = enumerator.EnumAudioEndpoints(0, 1)
+            for i in range(collection.GetCount()):
+                dev = AudioUtilities.CreateDevice(collection.Item(i))
+                devices.append({
+                    "id": dev.id,
+                    "name": dev.FriendlyName or "Unknown device",
+                    "default": dev.id == default_id,
+                })
+        except Exception as e:
+            print(f"Failed to list output devices: {e}")
+        return devices
+
+    @staticmethod
+    def set_output_device(device_id: str) -> bool:
+        """Make a playback device the Windows default for all roles."""
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            policy = _get_policy_config()
+            for role in (0, 1, 2):  # eConsole, eMultimedia, eCommunications
+                policy.SetDefaultEndpoint(device_id, role)
+            return True
+        except Exception as e:
+            print(f"Failed to set output device: {e}")
+            return False
 
     @staticmethod
     def get_brightness() -> int:
@@ -397,6 +545,36 @@ class SystemControl:
     def sleep() -> None:
         """Put the computer to sleep."""
         subprocess.run(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
+
+    @staticmethod
+    def reinstall_spotify() -> None:
+        """Automatically uninstall and reinstall Spotify."""
+        import os
+        import urllib.request
+        
+        try:
+            # Kill Spotify if running
+            subprocess.run(["taskkill", "/F", "/IM", "Spotify.exe"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "spotify_cli.exe"], capture_output=True)
+            
+            # Uninstall silently
+            uninstaller = os.path.expandvars(r"%APPDATA%\Spotify\uninstall.exe")
+            if os.path.exists(uninstaller):
+                subprocess.run([uninstaller, "/S"], capture_output=True)
+                
+            # Wait for uninstall to complete
+            import time
+            time.sleep(3)
+            
+            # Download new setup
+            setup_path = os.path.expandvars(r"%TEMP%\SpotifySetup.exe")
+            urllib.request.urlretrieve("https://download.scdn.co/SpotifySetup.exe", setup_path)
+            
+            # Run installer (it will auto-launch Spotify when done)
+            subprocess.run([setup_path], creationflags=0x08000000)
+            
+        except Exception as e:
+            print(f"Spotify reinstall failed: {e}")
 
     @staticmethod
     def lock_screen() -> None:

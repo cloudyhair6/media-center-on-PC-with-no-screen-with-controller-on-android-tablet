@@ -118,6 +118,7 @@ public class MainActivity extends Activity {
 
     private Handler handler = new Handler();
     private boolean allowSettings = false;
+    private int testUnlockCounter = 0;
     private boolean shuffleOn = false;
     private String repeatState = "off";
 
@@ -281,6 +282,31 @@ public class MainActivity extends Activity {
         }
     };
 
+    private long lastSpotifyReinstallPrompt = 0;
+    
+    private void showSpotifyReinstallDialog() {
+        if (System.currentTimeMillis() - lastSpotifyReinstallPrompt < 60000) {
+            return; // Don't spam the dialog
+        }
+        lastSpotifyReinstallPrompt = System.currentTimeMillis();
+        
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("Spotify Error")
+                    .setMessage("Spotify connection failed. Do you want to reinstall Spotify automatically? This will uninstall and download the latest version.")
+                    .setPositiveButton("Reinstall", new DialogInterface.OnClickListener() {
+                        public void onClick(DialogInterface dialog, int which) {
+                            sendCommand("/api/system/spotify_reinstall");
+                        }
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            }
+        });
+    }
+
     private void updateNowPlayingFromJson(JSONObject json) {
         hideNpLoading();
         if (json == null) return;
@@ -290,6 +316,14 @@ public class MainActivity extends Activity {
             String album = json.optString("album", "");
             isNpPlaying = json.optBoolean("playing", false);
             boolean isAd = json.optBoolean("is_ad", false);
+            
+            // Check for Spotify CLI crash / connection failure
+            if (title.toLowerCase().contains("failed to connect") || title.toLowerCase().contains("client connection failed")) {
+                if (npTitle != null) npTitle.setText("Spotify Connection Failed");
+                if (npArtist != null) npArtist.setText("Tap here or use reinstall dialog");
+                showSpotifyReinstallDialog();
+                return;
+            }
 
             if (npTitle != null) npTitle.setText(title);
             if (npArtist != null) npArtist.setText(isAd ? "Advertisement" : artist);
@@ -726,8 +760,8 @@ public class MainActivity extends Activity {
         try {
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
+            conn.setConnectTimeout(30000);
+            conn.setReadTimeout(30000);
             is = conn.getInputStream();
             baos = new ByteArrayOutputStream();
             byte[] buf = new byte[2048];
@@ -839,12 +873,12 @@ public class MainActivity extends Activity {
                     String topPackage = am.getRunningTasks(1).get(0).topActivity.getPackageName();
                     if (topPackage.equals("com.android.settings") || topPackage.equals("com.amazon.kindle.otter.settings")) {
                         Intent i = new Intent(MainActivity.this, MainActivity.class);
-                        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                         startActivity(i);
                     }
                 } catch (Exception e) {}
             }
-            handler.postDelayed(this, 1000);
+            handler.postDelayed(this, 100);
         }
     };
 
@@ -906,7 +940,7 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(lyricsSyncRunnable);
         handler.removeCallbacks(pollSystemStats);
         handler.removeCallbacks(pollUnlock);
-        handler.removeCallbacks(blockSettings);
+        // deliberately leaving blockSettings running to ensure it constantly blocks escaping
     }
 
     private void initViews() {
@@ -1100,9 +1134,29 @@ public class MainActivity extends Activity {
                     .setPositiveButton("Connect", new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int whichButton) {
                             String newIp = input.getText().toString().trim();
-                            if (!newIp.isEmpty()) {
-                                saveIp(newIp);
-                                connectToIp(newIp);
+                            if ("test".equalsIgnoreCase(newIp)) {
+                                testUnlockCounter++;
+                                if (testUnlockCounter >= 4) {
+                                    allowSettings = !allowSettings;
+                                    if (allowSettings) {
+                                        handler.removeCallbacks(blockSettings);
+                                        getApplicationContext().getSharedPreferences("MediaCentre", MODE_PRIVATE)
+                                                .edit().putBoolean("unlocked", true).commit();
+                                        android.widget.Toast.makeText(MainActivity.this, "Developer Mode Unlocked", android.widget.Toast.LENGTH_SHORT).show();
+                                    } else {
+                                        handler.post(blockSettings);
+                                        getApplicationContext().getSharedPreferences("MediaCentre", MODE_PRIVATE)
+                                                .edit().putBoolean("unlocked", false).commit();
+                                        android.widget.Toast.makeText(MainActivity.this, "Developer Mode Locked", android.widget.Toast.LENGTH_SHORT).show();
+                                    }
+                                    testUnlockCounter = 0;
+                                }
+                            } else {
+                                testUnlockCounter = 0;
+                                if (!newIp.isEmpty()) {
+                                    saveIp(newIp);
+                                    connectToIp(newIp);
+                                }
                             }
                         }
                     }).setNegativeButton("Cancel", null).show();
@@ -1232,11 +1286,26 @@ public class MainActivity extends Activity {
                     } catch (Exception e) {}
 
                     String serverVersion = json.optString("version", appVersion);
+                    final String targetVersion = serverVersion;
                     if (!appVersion.equals(serverVersion)) {
                         new AlertDialog.Builder(MainActivity.this)
                             .setTitle("Update Available")
-                            .setMessage("Please update to version " + serverVersion + "\nCurrent version is: " + appVersion)
-                            .setPositiveButton("Do it later", null)
+                            .setMessage("An update is available (Version " + serverVersion + ").\nDo you want to update this tablet app now?\n\n(Current version: " + appVersion + ")")
+                            .setPositiveButton("Update", new DialogInterface.OnClickListener() {
+                                public void onClick(DialogInterface dialog, int which) {
+                                    api.get("/api/system/tablet_update_install?version=" + targetVersion, new ApiClient.Callback() {
+                                        @Override
+                                        public void onSuccess(String response) {
+                                            showToast("Update started! Please wait a moment...", true);
+                                        }
+                                        @Override
+                                        public void onError(String error) {
+                                            showToast("Failed to start update: " + error, false);
+                                        }
+                                    });
+                                }
+                            })
+                            .setNegativeButton("Ignore", null)
                             .show();
                     } else {
                         showToast("Up-to-date", true);
