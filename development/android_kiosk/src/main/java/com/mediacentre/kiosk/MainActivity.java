@@ -3,6 +3,7 @@ package com.mediacentre.kiosk;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -1264,6 +1265,63 @@ public class MainActivity extends Activity {
         }
         setupConnectionScreen();
     }
+    private ProgressDialog updateDialog = null;
+
+    private void pollUpdateStatus() {
+        api.get("/api/system/tablet_update_status", new ApiClient.Callback() {
+            @Override
+            public void onSuccess(String response) {
+                try {
+                    org.json.JSONObject json = new org.json.JSONObject(response);
+                    final String status = json.optString("status", "idle");
+                    final String message = json.optString("message", "");
+                    final String error = json.optString("error", "");
+                    
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if ("error".equals(status)) {
+                                if (updateDialog != null) { updateDialog.dismiss(); updateDialog = null; }
+                                new AlertDialog.Builder(MainActivity.this)
+                                    .setTitle("Update Failed")
+                                    .setMessage(error)
+                                    .setPositiveButton("OK", null)
+                                    .show();
+                            } else if ("success".equals(status)) {
+                                if (updateDialog != null) {
+                                    updateDialog.setMessage(message);
+                                }
+                            } else if ("running".equals(status)) {
+                                if (updateDialog != null) {
+                                    updateDialog.setMessage(message);
+                                }
+                                handler.postDelayed(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        pollUpdateStatus();
+                                    }
+                                }, 1500);
+                            }
+                        }
+                    });
+                } catch (Exception e) {}
+            }
+            @Override
+            public void onError(String error) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        handler.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                pollUpdateStatus();
+                            }
+                        }, 1500);
+                    }
+                });
+            }
+        });
+    }
 
     private void connectToIp(String ip) {
         currentIp = ip;
@@ -1293,14 +1351,25 @@ public class MainActivity extends Activity {
                             .setMessage("An update is available (Version " + serverVersion + ").\nDo you want to update this tablet app now?\n\n(Current version: " + appVersion + ")")
                             .setPositiveButton("Update", new DialogInterface.OnClickListener() {
                                 public void onClick(DialogInterface dialog, int which) {
+                                    updateDialog = new ProgressDialog(MainActivity.this);
+                                    updateDialog.setTitle("Updating Tablet");
+                                    updateDialog.setMessage("Starting update...");
+                                    updateDialog.setCancelable(false);
+                                    updateDialog.show();
+                                    
                                     api.get("/api/system/tablet_update_install?version=" + targetVersion, new ApiClient.Callback() {
                                         @Override
                                         public void onSuccess(String response) {
-                                            showToast("Update started! Please wait a moment...", true);
+                                            pollUpdateStatus();
                                         }
                                         @Override
-                                        public void onError(String error) {
-                                            showToast("Failed to start update: " + error, false);
+                                        public void onError(final String error) {
+                                            runOnUiThread(new Runnable() {
+                                                public void run() {
+                                                    if (updateDialog != null) { updateDialog.dismiss(); updateDialog = null; }
+                                                    showToast("Failed to start update: " + error, false);
+                                                }
+                                            });
                                         }
                                     });
                                 }

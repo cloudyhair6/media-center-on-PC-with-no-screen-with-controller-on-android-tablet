@@ -7,9 +7,17 @@ import sys
 base_dir = Path(os.path.abspath(__file__)).parent.parent.parent
 updater_script = base_dir / "updater" / "installer_and_updater.py"
 
+UPDATE_STATE = {
+    "status": "idle",
+    "message": "",
+    "error": ""
+}
+
+def get_update_status():
+    return UPDATE_STATE
+
 def check_for_update(current_version):
     try:
-        # Use subprocess to call the updater script headlessly
         result = subprocess.run(
             [sys.executable, str(updater_script), "--get-latest-version"],
             capture_output=True, text=True
@@ -25,6 +33,9 @@ def check_for_update(current_version):
         return {"error": str(e)}
 
 def do_install_update(client_ip, latest_version):
+    global UPDATE_STATE
+    UPDATE_STATE = {"status": "running", "message": "Downloading APK from GitHub...", "error": ""}
+    
     try:
         print(f"[TabletUpdater] Downloading APK for version {latest_version}...")
         temp_apk = os.path.expandvars(r"%TEMP%\minipc_tablet_app.apk")
@@ -35,9 +46,12 @@ def do_install_update(client_ip, latest_version):
         )
         
         if "SUCCESS" not in result.stdout:
-            print(f"[TabletUpdater] Failed to download APK from GitHub. Output: {result.stdout}")
+            error_msg = result.stderr if result.stderr else result.stdout
+            UPDATE_STATE = {"status": "error", "message": "", "error": f"Failed to download APK from GitHub. Details: {error_msg}"}
+            print(f"[TabletUpdater] {UPDATE_STATE['error']}")
             return
             
+        UPDATE_STATE["message"] = "Connecting to tablet via ADB..."
         adb_path = base_dir / "platform-tools" / "adb.exe"
         if not adb_path.exists():
             adb_path = "adb" 
@@ -45,12 +59,24 @@ def do_install_update(client_ip, latest_version):
         print(f"[TabletUpdater] Connecting to tablet at {client_ip}...")
         subprocess.run([str(adb_path), "connect", client_ip], capture_output=True)
         
+        UPDATE_STATE["message"] = "Transferring and installing APK onto tablet (this may take a minute)..."
         print(f"[TabletUpdater] Installing APK to tablet...")
-        subprocess.run([str(adb_path), "-s", f"{client_ip}:5555", "install", "-r", temp_apk], capture_output=True)
+        
+        inst_res = subprocess.run([str(adb_path), "-s", f"{client_ip}:5555", "install", "-r", temp_apk], capture_output=True, text=True)
+        
+        if inst_res.returncode != 0:
+            UPDATE_STATE = {"status": "error", "message": "", "error": f"ADB Install Failed: {inst_res.stderr or inst_res.stdout}"}
+            print(f"[TabletUpdater] {UPDATE_STATE['error']}")
+            return
+            
+        UPDATE_STATE = {"status": "success", "message": "Update installed successfully! The app should restart shortly.", "error": ""}
         print("[TabletUpdater] Tablet update installed successfully.")
         
     except Exception as e:
-        print(f"[TabletUpdater] Failed to install tablet update: {e}")
+        UPDATE_STATE = {"status": "error", "message": "", "error": f"Python Script Error: {str(e)}"}
+        print(f"[TabletUpdater] {UPDATE_STATE['error']}")
 
 def trigger_install(client_ip, latest_version):
+    if UPDATE_STATE["status"] == "running":
+        return
     threading.Thread(target=do_install_update, args=(client_ip, latest_version), daemon=True).start()

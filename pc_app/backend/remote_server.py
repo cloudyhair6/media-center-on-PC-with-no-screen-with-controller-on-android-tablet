@@ -424,6 +424,13 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     self._json_response(500, {"error": str(e)})
                 return
+            elif action == "tablet_update_status":
+                try:
+                    from backend.tablet_updater import get_update_status
+                    self._json_response(200, get_update_status())
+                except Exception as e:
+                    self._json_response(500, {"error": str(e)})
+                return
             
             try:
                 from backend.system_control import SystemControl
