@@ -35,3 +35,9 @@ python main.py
 REM Restore explorer when app exits
 start explorer.exe
 cd ..
+if defined VIRTUAL_ENV (
+    echo A virtual environment is active. Deactivating now...
+    call deactivate
+) else (
+    echo No virtual environment is currently active.
+)

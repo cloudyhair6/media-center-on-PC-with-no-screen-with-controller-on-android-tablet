@@ -4,16 +4,18 @@ import threading
 from pathlib import Path
 import sys
 
-# Ensure updater is in path
-base_dir = Path(__file__).resolve().parent.parent.parent
-sys.path.append(str(base_dir))
-
-from updater.installer_and_updater import get_latest_release_version, download_file_content
+base_dir = Path(os.path.abspath(__file__)).parent.parent.parent
+updater_script = base_dir / "updater" / "installer_and_updater.py"
 
 def check_for_update(current_version):
     try:
-        latest = get_latest_release_version()
-        if not latest:
+        # Use subprocess to call the updater script headlessly
+        result = subprocess.run(
+            [sys.executable, str(updater_script), "--get-latest-version"],
+            capture_output=True, text=True
+        )
+        latest = result.stdout.strip()
+        if not latest or latest == "FAILED":
             return {"update_available": False}
         
         if latest.lower() != current_version.lower():
@@ -25,14 +27,16 @@ def check_for_update(current_version):
 def do_install_update(client_ip, latest_version):
     try:
         print(f"[TabletUpdater] Downloading APK for version {latest_version}...")
-        content = download_file_content("tablet_apk/app.apk", latest_version)
-        if not content:
-            print("[TabletUpdater] Failed to download APK from GitHub.")
-            return
-
         temp_apk = os.path.expandvars(r"%TEMP%\minipc_tablet_app.apk")
-        with open(temp_apk, "wb") as f:
-            f.write(content)
+        
+        result = subprocess.run(
+            [sys.executable, str(updater_script), "--download-file", "tablet_apk/app.apk", "--tag", latest_version, "--out-file", temp_apk],
+            capture_output=True, text=True
+        )
+        
+        if "SUCCESS" not in result.stdout:
+            print(f"[TabletUpdater] Failed to download APK from GitHub. Output: {result.stdout}")
+            return
             
         adb_path = base_dir / "platform-tools" / "adb.exe"
         if not adb_path.exists():
