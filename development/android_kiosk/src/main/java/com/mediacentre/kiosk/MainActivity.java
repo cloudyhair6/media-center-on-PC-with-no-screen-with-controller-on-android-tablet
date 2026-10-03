@@ -245,9 +245,12 @@ public class MainActivity extends Activity {
             }
             if (screenMain.getVisibility() == View.VISIBLE && tabMusic.getVisibility() == View.VISIBLE) {
                 isSpotifyPolling = true;
+                final ProgressBar npUpdateProgress = (ProgressBar) findViewById(R.id.np_update_progress);
+                if (npUpdateProgress != null) npUpdateProgress.setVisibility(View.VISIBLE);
                 api.get("/api/spotify/now_playing", new ApiClient.Callback() {
                     @Override
                     public void onSuccess(String response) {
+                        if (npUpdateProgress != null) npUpdateProgress.setVisibility(View.GONE);
                         isSpotifyPolling = false;
                         onConnectionSuccess();
                         try {
@@ -257,6 +260,7 @@ public class MainActivity extends Activity {
                     }
                     @Override
                     public void onError(String error) {
+                        if (npUpdateProgress != null) npUpdateProgress.setVisibility(View.GONE);
                         isSpotifyPolling = false;
                         hideNpLoading();
                         onConnectionFailure();
@@ -2734,7 +2738,7 @@ public class MainActivity extends Activity {
             if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
             npArtwork.setImageResource(R.drawable.ic_error);
             if (npArtErrorLayout != null) npArtErrorLayout.setVisibility(View.VISIBLE);
-            if (npArtErrorText != null) npArtErrorText.setText("URL not provided by PC");
+            if (npArtErrorText != null) npArtErrorText.setText("cannot get url");
             if (npArtRetryBtn != null) {
                 npArtRetryBtn.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View v) {
@@ -2817,7 +2821,7 @@ public class MainActivity extends Activity {
                 if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
                 npArtwork.setImageResource(R.drawable.ic_error);
                 if (npArtErrorLayout != null) npArtErrorLayout.setVisibility(View.VISIBLE);
-                if (npArtErrorText != null) npArtErrorText.setText(errorMsg);
+                if (npArtErrorText != null) npArtErrorText.setText("cannot get url");
                 if (npArtRetryBtn != null) {
                     npArtRetryBtn.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) {
