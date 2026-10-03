@@ -5,7 +5,9 @@ from pathlib import Path
 import sys
 
 base_dir = Path(os.path.abspath(__file__)).parent.parent.parent
-updater_script = base_dir / "updater" / "installer_and_updater.py"
+updater_script = base_dir / "installer_and_updater.py"
+if not updater_script.exists():
+    updater_script = base_dir / "updater" / "installer_and_updater.py"
 
 UPDATE_STATE = {
     "status": "idle",
