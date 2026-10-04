@@ -1291,6 +1291,9 @@ public class MainActivity extends Activity {
                                     .setMessage(error)
                                     .setPositiveButton("OK", null)
                                     .show();
+                            } else if ("manual_install".equals(status)) {
+                                if (updateDialog != null) { updateDialog.setMessage("Downloading APK directly to tablet..."); }
+                                downloadAndInstallApkManually();
                             } else if ("success".equals(status)) {
                                 if (updateDialog != null) {
                                     updateDialog.setMessage(message);
@@ -1325,6 +1328,46 @@ public class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    private void downloadAndInstallApkManually() {
+        new android.os.AsyncTask<Void, Void, java.io.File>() {
+            @Override
+            protected java.io.File doInBackground(Void... voids) {
+                try {
+                    java.net.URL url = new java.net.URL("http://" + currentIp + ":8080/api/system/tablet_apk");
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn.connect();
+                    if (conn.getResponseCode() != 200) return null;
+                    java.io.File sdcard = android.os.Environment.getExternalStorageDirectory();
+                    java.io.File apkFile = new java.io.File(sdcard, "minipc_update.apk");
+                    java.io.InputStream in = conn.getInputStream();
+                    java.io.FileOutputStream out = new java.io.FileOutputStream(apkFile);
+                    byte[] buffer = new byte[4096];
+                    int len;
+                    while ((len = in.read(buffer)) > 0) {
+                        out.write(buffer, 0, len);
+                    }
+                    out.close();
+                    in.close();
+                    return apkFile;
+                } catch (Exception e) {
+                    return null;
+                }
+            }
+            @Override
+            protected void onPostExecute(java.io.File apkFile) {
+                if (updateDialog != null) { updateDialog.dismiss(); updateDialog = null; }
+                if (apkFile != null) {
+                    Intent intent = new Intent(Intent.ACTION_VIEW);
+                    intent.setDataAndType(android.net.Uri.fromFile(apkFile), "application/vnd.android.package-archive");
+                    intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                } else {
+                    showToast("Failed to download APK directly.", false);
+                }
+            }
+        }.execute();
     }
 
     private void connectToIp(String ip) {

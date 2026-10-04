@@ -60,20 +60,24 @@ def do_install_update(client_ip, latest_version):
             if shutil.which("adb"):
                 adb_path = "adb"
             else:
-                UPDATE_STATE = {"status": "error", "message": "", "error": "ADB (Android Debug Bridge) is missing on this PC! Ensure the platform-tools folder is downloaded."}
+                UPDATE_STATE = {"status": "manual_install", "message": "", "error": "ADB is missing on this PC. Please click OK to install manually on the tablet."}
                 print(f"[TabletUpdater] {UPDATE_STATE['error']}")
                 return
             
         print(f"[TabletUpdater] Connecting to tablet at {client_ip}...")
-        subprocess.run([str(adb_path), "connect", client_ip], capture_output=True)
+        conn_res = subprocess.run([str(adb_path), "connect", client_ip], capture_output=True, text=True)
+        if "cannot connect" in conn_res.stdout.lower() or "cannot connect" in conn_res.stderr.lower():
+            UPDATE_STATE = {"status": "manual_install", "message": "", "error": "Wireless ADB failed to connect. Please click OK to download and install the update manually."}
+            print(f"[TabletUpdater] {UPDATE_STATE['error']}")
+            return
         
         UPDATE_STATE["message"] = "Transferring and installing APK onto tablet (this may take a minute)..."
         print(f"[TabletUpdater] Installing APK to tablet...")
         
         inst_res = subprocess.run([str(adb_path), "-s", f"{client_ip}:5555", "install", "-r", temp_apk], capture_output=True, text=True)
         
-        if inst_res.returncode != 0:
-            UPDATE_STATE = {"status": "error", "message": "", "error": f"ADB Install Failed: {inst_res.stderr or inst_res.stdout}"}
+        if inst_res.returncode != 0 or "failed" in inst_res.stdout.lower() or "failed" in inst_res.stderr.lower():
+            UPDATE_STATE = {"status": "manual_install", "message": "", "error": f"Silent ADB Install Failed. Please click OK to install the update manually."}
             print(f"[TabletUpdater] {UPDATE_STATE['error']}")
             return
             

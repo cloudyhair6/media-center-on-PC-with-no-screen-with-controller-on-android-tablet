@@ -431,6 +431,20 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     self._json_response(500, {"error": str(e)})
                 return
+            elif action == "tablet_apk":
+                import os
+                temp_apk = os.path.expandvars(r"%TEMP%\minipc_tablet_app.apk")
+                if os.path.exists(temp_apk):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/vnd.android.package-archive")
+                    self.send_header("Content-Length", str(os.path.getsize(temp_apk)))
+                    self.end_headers()
+                    with open(temp_apk, "rb") as f:
+                        import shutil
+                        shutil.copyfileobj(f, self.wfile)
+                else:
+                    self.send_error(404, "APK not found")
+                return
             
             try:
                 from backend.system_control import SystemControl
