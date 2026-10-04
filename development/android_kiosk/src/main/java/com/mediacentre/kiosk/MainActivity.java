@@ -245,14 +245,28 @@ public class MainActivity extends Activity {
             }
             if (screenMain.getVisibility() == View.VISIBLE && tabMusic.getVisibility() == View.VISIBLE) {
                 isSpotifyPolling = true;
-                final ProgressBar npUpdateProgress = (ProgressBar) findViewById(R.id.np_update_progress);
-                if (npUpdateProgress != null) npUpdateProgress.setVisibility(View.VISIBLE);
+                
+                // Show connecting status quietly
+                updateConnectionStatus(STATUS_CONNECTING);
+                
+                // If the poll takes more than 2 seconds (usually when fetching new song metadata),
+                // fall back to showing the full-screen loading overlay.
+                final Runnable loadingFallback = new Runnable() {
+                    @Override
+                    public void run() {
+                        showLoading("Loading next song...");
+                    }
+                };
+                handler.postDelayed(loadingFallback, 2000);
+
                 api.get("/api/spotify/now_playing", new ApiClient.Callback() {
                     @Override
                     public void onSuccess(String response) {
-                        if (npUpdateProgress != null) npUpdateProgress.setVisibility(View.GONE);
+                        handler.removeCallbacks(loadingFallback);
+                        hideLoading();
+                        
                         isSpotifyPolling = false;
-                        onConnectionSuccess();
+                        onConnectionSuccess(); // This resets the status to connected
                         try {
                             JSONObject json = new JSONObject(response);
                             updateNowPlayingFromJson(json);
@@ -260,10 +274,12 @@ public class MainActivity extends Activity {
                     }
                     @Override
                     public void onError(String error) {
-                        if (npUpdateProgress != null) npUpdateProgress.setVisibility(View.GONE);
+                        handler.removeCallbacks(loadingFallback);
+                        hideLoading();
+                        
                         isSpotifyPolling = false;
                         hideNpLoading();
-                        onConnectionFailure();
+                        onConnectionFailure(); // Sets status to offline
                     }
                 });
                 
