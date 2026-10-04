@@ -3,7 +3,8 @@
         "Files": [
             "setup.bat",
             "start.bat",
-            "pc_app/"
+            "pc_app/",
+            "platform-tools/"
         ],
         "Message": "Run the setup.bat file first, it will tell you what to do next!"
     },
