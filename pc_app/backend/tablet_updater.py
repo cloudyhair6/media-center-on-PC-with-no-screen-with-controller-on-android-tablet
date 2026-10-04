@@ -56,7 +56,13 @@ def do_install_update(client_ip, latest_version):
         UPDATE_STATE["message"] = "Connecting to tablet via ADB..."
         adb_path = base_dir / "platform-tools" / "adb.exe"
         if not adb_path.exists():
-            adb_path = "adb" 
+            import shutil
+            if shutil.which("adb"):
+                adb_path = "adb"
+            else:
+                UPDATE_STATE = {"status": "error", "message": "", "error": "ADB (Android Debug Bridge) is missing on this PC! Ensure the platform-tools folder is downloaded."}
+                print(f"[TabletUpdater] {UPDATE_STATE['error']}")
+                return
             
         print(f"[TabletUpdater] Connecting to tablet at {client_ip}...")
         subprocess.run([str(adb_path), "connect", client_ip], capture_output=True)
