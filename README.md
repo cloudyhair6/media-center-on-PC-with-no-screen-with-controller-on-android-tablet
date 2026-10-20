@@ -2,7 +2,7 @@
 Follow the intructions on the latest release [here](https://github.com/cloudyhair6/media-center-on-PC-with-no-screen-with-controller-on-android-tablet/releases/latest)
 ## Required:
 * Windows 11 - [https://www.microsoft.com/en-gb/windows/get-windows-11](https://www.microsoft.com/en-gb/windows/get-windows-11) - [https://www.microsoft.com/en-us/software-download/windows11](https://www.microsoft.com/en-us/software-download/windows11)
-* Sourund sound setup of 5.1 on a HDMI port on your GPU that is not __NVIDIA__!
+* Surround sound setup of 5.1 on a HDMI port on your GPU that is not __NVIDIA__!
 * Equalizer APO on your GPU (There is a really big issue with __NVIDIA__ GPUs so don't use GPUs from __NVIDIA__) - [https://equalizerapo.com/download](https://equalizerapo.com/download) - [https://onboardcloud.dl.sourceforge.net/project/equalizerapo/1.4.2/EqualizerAPO-x64-1.4.2.exe?viasf=1](https://onboardcloud.dl.sourceforge.net/project/equalizerapo/1.4.2/EqualizerAPO-x64-1.4.2.exe?viasf=1)
 * Spotify not from the microsoft store directly - [spotify.com/download](https://spotify.com/download) click Download directly from Spotify ignore the big download from the microsoft store button - [https://download.scdn.co/SpotifySetup.exe](https://download.scdn.co/SpotifySetup.exe),
 * Python 3.12 - [https://www.python.org/downloads/release/python-31210/](https://www.python.org/downloads/release/python-31210/) - [https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe](https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe)
