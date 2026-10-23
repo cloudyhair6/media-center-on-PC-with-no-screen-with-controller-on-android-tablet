@@ -1,5 +1,5 @@
 # media-center-on-PC-with-no-screen-with-controller-on-android-tablet
-Follow the intructions on the latest release [here](https://github.com/cloudyhair6/media-center-on-PC-with-no-screen-with-controller-on-android-tablet/releases/latest)
+Follow the intructions on the latest release [here](https://github.com/cloudyhair6/media-center-on-PC-with-no-screen-with-controller-on-android-tablet/releases/latest) or just download the latest installer_and_updater.py [here](https://github.com/cloudyhair6/media-center-on-PC-with-no-screen-with-controller-on-android-tablet/releases/latest/download/installer_and_updater.py)
 ## Required:
 * Windows 11 - [https://www.microsoft.com/en-gb/windows/get-windows-11](https://www.microsoft.com/en-gb/windows/get-windows-11) - [https://www.microsoft.com/en-us/software-download/windows11](https://www.microsoft.com/en-us/software-download/windows11)
 * Surround sound setup of 5.1 on a HDMI port on your GPU that is not __NVIDIA__!
