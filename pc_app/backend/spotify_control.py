@@ -37,6 +37,7 @@ import urllib.request
 class SpotifyControl:
     """Control Spotify via Windows SMTC, spotify_cli.exe and fallback APIs."""
 
+    _cli_lock = __import__("threading").RLock()
     _last_title = ""
     _last_artist = ""
     _last_album = ""
@@ -95,24 +96,25 @@ class SpotifyControl:
         cli = SpotifyControl._get_cli_path()
         if not Path(cli).exists():
             return ""
-        try:
-            # We don't force utf-8 here initially so we can fallback if it fails.
-            # The JSON payload will be in utf-8, but print statements from CLI may be cp1252.
-            # subprocess.run blocks, but CLI is extremely fast.
-            # creationflags=0x08000000 is CREATE_NO_WINDOW to prevent cmd popping up
-            result = subprocess.run([cli] + args, capture_output=True, timeout=5, creationflags=0x08000000)
-            text = result.stdout.decode('utf-8', errors='replace').strip()
-            err_text = result.stderr.decode('utf-8', errors='replace').strip()
-            
-            if "client is not running" in text or "client is not running" in err_text:
-                SpotifyControl.launch()
-                time.sleep(1.5)
+        with SpotifyControl._cli_lock:
+            try:
+                # We don't force utf-8 here initially so we can fallback if it fails.
+                # The JSON payload will be in utf-8, but print statements from CLI may be cp1252.
+                # subprocess.run blocks, but CLI is extremely fast.
+                # creationflags=0x08000000 is CREATE_NO_WINDOW to prevent cmd popping up
                 result = subprocess.run([cli] + args, capture_output=True, timeout=5, creationflags=0x08000000)
                 text = result.stdout.decode('utf-8', errors='replace').strip()
-            return text
-        except Exception as e:
-            print(f"CLI Error: {e}")
-            return ""
+                err_text = result.stderr.decode('utf-8', errors='replace').strip()
+                
+                if "client is not running" in text or "client is not running" in err_text:
+                    SpotifyControl.launch()
+                    time.sleep(1.5)
+                    result = subprocess.run([cli] + args, capture_output=True, timeout=5, creationflags=0x08000000)
+                    text = result.stdout.decode('utf-8', errors='replace').strip()
+                return text
+            except Exception as e:
+                print(f"CLI Error: {e}")
+                return ""
 
     @staticmethod
     def is_running() -> bool:
@@ -145,10 +147,12 @@ class SpotifyControl:
 
     @staticmethod
     def next_track() -> None:
+        SpotifyControl._last_title = ""
         SpotifyControl._run_cli(["next"])
 
     @staticmethod
     def prev_track() -> None:
+        SpotifyControl._last_title = ""
         SpotifyControl._run_cli(["previous"])
 
     @staticmethod

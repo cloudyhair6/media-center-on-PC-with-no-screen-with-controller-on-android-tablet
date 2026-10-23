@@ -234,17 +234,179 @@ public class MainActivity extends Activity {
         }
     }
 
+    // Loading Stack & Background Poll Coordination
+    private static class LoadingEntry {
+        final int id;
+        final String text;
+        LoadingEntry(int id, String text) {
+            this.id = id;
+            this.text = text;
+        }
+    }
+
+    private final java.util.ArrayList<LoadingEntry> activeLoadings = new java.util.ArrayList<LoadingEntry>();
+    private int nextLoadingId = 1;
+    private int activeTaskCount = 0;
+    private int spotifyPollGeneration = 0;
+    private int currentPollLoadingId = -1;
+    private Runnable currentPollFallback = null;
+
+    private boolean isBusyWithOtherTasks() {
+        if (activeTaskCount > 0) return true;
+        for (int i = 0; i < activeLoadings.size(); i++) {
+            if (activeLoadings.get(i).id != currentPollLoadingId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void pauseSpotifyPolling(final boolean cancelInFlight) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                handler.removeCallbacks(pollSpotify);
+                if (cancelInFlight) {
+                    spotifyPollGeneration++;
+                    isSpotifyPolling = false;
+                    if (currentPollFallback != null) {
+                        handler.removeCallbacks(currentPollFallback);
+                        currentPollFallback = null;
+                    }
+                    if (currentPollLoadingId != -1) {
+                        int oldId = currentPollLoadingId;
+                        currentPollLoadingId = -1;
+                        stopLoading(oldId);
+                    }
+                }
+            }
+        });
+    }
+
+    private void resumeSpotifyPollingIfIdle(final int delayMs) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (!isBusyWithOtherTasks() && !isSpotifyPolling) {
+                    handler.removeCallbacks(pollSpotify);
+                    handler.postDelayed(pollSpotify, delayMs);
+                }
+            }
+        });
+    }
+
+    private void beginTask(final boolean cancelInFlightPoll) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                activeTaskCount++;
+                pauseSpotifyPolling(cancelInFlightPoll);
+            }
+        });
+    }
+
+    private void endTask(final int resumeDelayMs) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                activeTaskCount = Math.max(0, activeTaskCount - 1);
+                resumeSpotifyPollingIfIdle(resumeDelayMs);
+            }
+        });
+    }
+
+    private int startLoading(final String text) {
+        return startLoadingInternal(text, false, false);
+    }
+
+    private int startLoading(final String text, final boolean cancelInFlightPoll) {
+        return startLoadingInternal(text, false, cancelInFlightPoll);
+    }
+
+    private int startBackgroundLoading(final String text) {
+        return startLoadingInternal(text, true, false);
+    }
+
+    private int startLoadingInternal(final String text, final boolean insertAtBottom, final boolean cancelInFlightPoll) {
+        final int id = nextLoadingId++;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (!insertAtBottom) {
+                    pauseSpotifyPolling(cancelInFlightPoll);
+                    activeLoadings.add(new LoadingEntry(id, text));
+                } else {
+                    activeLoadings.add(0, new LoadingEntry(id, text));
+                }
+                if (!activeLoadings.isEmpty()) {
+                    LoadingEntry top = activeLoadings.get(activeLoadings.size() - 1);
+                    if (loadingText != null) loadingText.setText(top.text);
+                    if (loadingOverlay != null) loadingOverlay.setVisibility(View.VISIBLE);
+                }
+            }
+        });
+        return id;
+    }
+
+    private void stopLoading(final int id) {
+        if (id <= 0) return;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                for (int i = activeLoadings.size() - 1; i >= 0; i--) {
+                    if (activeLoadings.get(i).id == id) {
+                        activeLoadings.remove(i);
+                        break;
+                    }
+                }
+                if (activeLoadings.isEmpty()) {
+                    if (loadingOverlay != null) loadingOverlay.setVisibility(View.GONE);
+                    resumeSpotifyPollingIfIdle(2000);
+                } else {
+                    LoadingEntry top = activeLoadings.get(activeLoadings.size() - 1);
+                    if (loadingText != null) loadingText.setText(top.text);
+                    if (loadingOverlay != null) loadingOverlay.setVisibility(View.VISIBLE);
+                }
+            }
+        });
+    }
+
+    private void fetchSongInfoNow() {
+        if (api == null) return;
+        final int loadId = startLoading("Loading song info...", true);
+        api.get("/api/spotify/now_playing?force=true", new ApiClient.Callback() {
+            @Override
+            public void onSuccess(String response) {
+                stopLoading(loadId);
+                onConnectionSuccess();
+                try {
+                    JSONObject json = new JSONObject(response);
+                    updateNowPlayingFromJson(json);
+                } catch (Exception e) {}
+            }
+            @Override
+            public void onError(String error) {
+                stopLoading(loadId);
+                onConnectionFailure();
+            }
+        });
+    }
+
     // Polling Runnables
     private boolean isSpotifyPolling = false;
     private Runnable pollSpotify = new Runnable() {
         @Override
         public void run() {
+            if (isBusyWithOtherTasks()) {
+                return;
+            }
             if (isSpotifyPolling) {
                 handler.postDelayed(this, 1000);
                 return;
             }
-            if (screenMain.getVisibility() == View.VISIBLE && tabMusic.getVisibility() == View.VISIBLE) {
+            if (screenMain.getVisibility() == View.VISIBLE && tabMusic.getVisibility() == View.VISIBLE && api != null) {
                 isSpotifyPolling = true;
+                final int myPollGen = ++spotifyPollGeneration;
                 
                 // Show connecting status quietly
                 updateConnectionStatus(STATUS_CONNECTING);
@@ -254,16 +416,25 @@ public class MainActivity extends Activity {
                 final Runnable loadingFallback = new Runnable() {
                     @Override
                     public void run() {
-                        showLoading("Loading next song...");
+                        if (isSpotifyPolling && myPollGen == spotifyPollGeneration && currentPollLoadingId == -1) {
+                            currentPollLoadingId = startBackgroundLoading("Loading song info...");
+                        }
                     }
                 };
+                currentPollFallback = loadingFallback;
                 handler.postDelayed(loadingFallback, 2000);
 
                 api.get("/api/spotify/now_playing", new ApiClient.Callback() {
                     @Override
                     public void onSuccess(String response) {
+                        if (myPollGen != spotifyPollGeneration) return;
                         handler.removeCallbacks(loadingFallback);
-                        hideLoading();
+                        if (currentPollFallback == loadingFallback) currentPollFallback = null;
+                        if (currentPollLoadingId != -1) {
+                            int oldId = currentPollLoadingId;
+                            currentPollLoadingId = -1;
+                            stopLoading(oldId);
+                        }
                         
                         isSpotifyPolling = false;
                         onConnectionSuccess(); // This resets the status to connected
@@ -271,21 +442,30 @@ public class MainActivity extends Activity {
                             JSONObject json = new JSONObject(response);
                             updateNowPlayingFromJson(json);
                         } catch (Exception e) {}
+                        resumeSpotifyPollingIfIdle(2000);
                     }
                     @Override
                     public void onError(String error) {
+                        if (myPollGen != spotifyPollGeneration) return;
                         handler.removeCallbacks(loadingFallback);
-                        hideLoading();
+                        if (currentPollFallback == loadingFallback) currentPollFallback = null;
+                        if (currentPollLoadingId != -1) {
+                            int oldId = currentPollLoadingId;
+                            currentPollLoadingId = -1;
+                            stopLoading(oldId);
+                        }
                         
                         isSpotifyPolling = false;
                         hideNpLoading();
                         onConnectionFailure(); // Sets status to offline
+                        resumeSpotifyPollingIfIdle(2000);
                     }
                 });
                 
                 api.get("/api/volume/current", new ApiClient.Callback() {
                     @Override
                     public void onSuccess(String response) {
+                        if (myPollGen != spotifyPollGeneration) return;
                         try {
                             JSONObject json = new JSONObject(response);
                             int v = json.getInt("volume");
@@ -298,8 +478,9 @@ public class MainActivity extends Activity {
                     @Override
                     public void onError(String error) {}
                 });
+            } else {
+                handler.postDelayed(this, 2000);
             }
-            handler.postDelayed(this, 2000);
         }
     };
 
@@ -491,9 +672,10 @@ public class MainActivity extends Activity {
             ("/api/spotify/seek?ms=" + positionMs + "&type=relative");
 
         if (api != null) {
+            beginTask(true);
             api.get(url, new ApiClient.Callback() {
-                @Override public void onSuccess(String response) {}
-                @Override public void onError(String error) {}
+                @Override public void onSuccess(String response) { endTask(2000); }
+                @Override public void onError(String error) { endTask(2000); }
             });
         }
     }
@@ -528,6 +710,7 @@ public class MainActivity extends Activity {
         }
 
         // Actively query /api/spotify/now_playing with force=true to get fresh track state
+        final int checkLoadId = startLoading("Loading Lyrics...");
         api.get("/api/spotify/now_playing?force=true", new ApiClient.Callback() {
             @Override
             public void onSuccess(final String response) {
@@ -582,6 +765,8 @@ public class MainActivity extends Activity {
                             String fbTitle = npTitle != null ? npTitle.getText().toString() : "";
                             String fbArtist = npArtist != null ? npArtist.getText().toString() : "";
                             fetchLyrics(fbTitle, fbArtist);
+                        } finally {
+                            stopLoading(checkLoadId);
                         }
                     }
                 });
@@ -592,21 +777,25 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        String fbTitle = npTitle != null ? npTitle.getText().toString() : "";
-                        String fbArtist = npArtist != null ? npArtist.getText().toString() : "";
-                        if (!fbTitle.isEmpty() && !fbTitle.equals("Not Playing") && !fbTitle.equals("Refreshing...") && !fbTitle.equals("Spotify")) {
-                            fetchLyrics(fbTitle, fbArtist);
-                        } else {
-                            if (lyricsContent != null) {
-                                clearContainerViews(lyricsContent);
-                                TextView tv = new TextView(MainActivity.this);
-                                tv.setText("Unable to sync now playing with PC");
-                                tv.setTextColor(0xFF8892b0);
-                                tv.setTextSize(18);
-                                tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                                tv.setPadding(0, 40, 0, 0);
-                                lyricsContent.addView(tv);
+                        try {
+                            String fbTitle = npTitle != null ? npTitle.getText().toString() : "";
+                            String fbArtist = npArtist != null ? npArtist.getText().toString() : "";
+                            if (!fbTitle.isEmpty() && !fbTitle.equals("Not Playing") && !fbTitle.equals("Refreshing...") && !fbTitle.equals("Spotify")) {
+                                fetchLyrics(fbTitle, fbArtist);
+                            } else {
+                                if (lyricsContent != null) {
+                                    clearContainerViews(lyricsContent);
+                                    TextView tv = new TextView(MainActivity.this);
+                                    tv.setText("Unable to sync now playing with PC");
+                                    tv.setTextColor(0xFF8892b0);
+                                    tv.setTextSize(18);
+                                    tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                                    tv.setPadding(0, 40, 0, 0);
+                                    lyricsContent.addView(tv);
+                                }
                             }
+                        } finally {
+                            stopLoading(checkLoadId);
                         }
                     }
                 });
@@ -1214,10 +1403,10 @@ public class MainActivity extends Activity {
     }
 
     private void showPlaylistSelector(final String trackUri) {
-        showLoading("Loading Playlists...");
+        final int loadId = startLoading("Loading Playlists...");
         api.get("/api/spotify/library/hierarchy", new ApiClient.Callback() {
             @Override public void onSuccess(String response) {
-                hideLoading();
+                stopLoading(loadId);
                 try {
                     JSONObject json = new JSONObject(response);
                     JSONArray items = json.optJSONArray("items");
@@ -1250,7 +1439,7 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {}
             }
             @Override public void onError(String error) {
-                hideLoading();
+                stopLoading(loadId);
                 showToast("Failed to load playlists", false);
             }
         });
@@ -1392,11 +1581,11 @@ public class MainActivity extends Activity {
         api = new ApiClient(ip);
         
         updateConnectionStatus(STATUS_CONNECTING);
-        showLoading("Connecting to " + ip + "...");
+        final int loadId = startLoading("Connecting to " + ip + "...");
         api.get("/api/status", new ApiClient.Callback() {
             @Override
             public void onSuccess(String response) {
-                hideLoading();
+                stopLoading(loadId);
                 onConnectionSuccess();
                 try {
                     org.json.JSONObject json = new org.json.JSONObject(response);
@@ -1451,7 +1640,7 @@ public class MainActivity extends Activity {
             }
             @Override
             public void onError(String error) {
-                hideLoading();
+                stopLoading(loadId);
                 consecutiveConnectionFailures = 2;
                 updateConnectionStatus(STATUS_OFFLINE);
                 showToast("Failed to connect", false);
@@ -1524,6 +1713,7 @@ public class MainActivity extends Activity {
         if (index == 0) {
             showNpLoading("Loading Now Playing...");
             if (api != null) {
+                beginTask(false);
                 api.get("/api/spotify/now_playing", new ApiClient.Callback() {
                     @Override
                     public void onSuccess(final String response) {
@@ -1536,6 +1726,7 @@ public class MainActivity extends Activity {
                                     JSONObject json = new JSONObject(response);
                                     updateNowPlayingFromJson(json);
                                 } catch (Exception e) {}
+                                endTask(2000);
                             }
                         });
                     }
@@ -1546,6 +1737,7 @@ public class MainActivity extends Activity {
                             public void run() {
                                 hideNpLoading();
                                 onConnectionFailure();
+                                endTask(2000);
                             }
                         });
                     }
@@ -1673,9 +1865,10 @@ public class MainActivity extends Activity {
                     shuffleOn = !shuffleOn;
                     btnShuffle.setText("Shuffle: " + (shuffleOn ? "ON" : "OFF"));
                     btnShuffle.setTextColor(shuffleOn ? 0xFF00d4ff : 0xFFffffff);
+                    beginTask(true);
                     api.get("/api/spotify/shuffle?state=" + (shuffleOn ? "true" : "false"), new ApiClient.Callback() {
-                        @Override public void onSuccess(String r) { showToast("Shuffle " + (shuffleOn ? "ON" : "OFF"), true); }
-                        @Override public void onError(String error) { showToast("Shuffle failed", false); }
+                        @Override public void onSuccess(String r) { endTask(2000); showToast("Shuffle " + (shuffleOn ? "ON" : "OFF"), true); }
+                        @Override public void onError(String error) { endTask(2000); showToast("Shuffle failed", false); }
                     });
                 }
             });
@@ -1695,9 +1888,10 @@ public class MainActivity extends Activity {
                     btnRepeat.setText("Repeat: " + label);
                     btnRepeat.setTextColor(repeatState.equals("off") ? 0xFFffffff : 0xFF00d4ff);
                     final String st = repeatState;
+                    beginTask(true);
                     api.get("/api/spotify/repeat?state=" + st, new ApiClient.Callback() {
-                        @Override public void onSuccess(String r) { showToast("Repeat: " + st, true); }
-                        @Override public void onError(String e) { showToast("Repeat failed", false); }
+                        @Override public void onSuccess(String r) { endTask(2000); showToast("Repeat: " + st, true); }
+                        @Override public void onError(String e) { endTask(2000); showToast("Repeat failed", false); }
                     });
                 }
             });
@@ -1720,14 +1914,14 @@ public class MainActivity extends Activity {
                 if (l.isEmpty()) l = "10";
                 String t = sp.getSelectedItem().toString();
                 if (!q.isEmpty()) {
-                    showLoading("Searching...");
+                    final int loadId = startLoading("Searching...");
                     api.get("/api/spotify/search?q=" + java.net.URLEncoder.encode(q) + "&type=" + t + "&limit=" + l, new ApiClient.Callback() {
                         @Override public void onSuccess(String response) {
-                            hideLoading();
+                            stopLoading(loadId);
                             renderSearchResults(response);
                         }
                         @Override public void onError(String error) {
-                            hideLoading();
+                            stopLoading(loadId);
                             showToast("Search failed", false);
                         }
                     });
@@ -1807,9 +2001,10 @@ public class MainActivity extends Activity {
                             }
                             
                             pb.setVisibility(View.VISIBLE);
-                            
+                            beginTask(false);
                             api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
                                 @Override public void onSuccess(String response) {
+                                    endTask(2000);
                                     try {
                                         JSONObject j = new JSONObject(response);
                                         final String imgUrl = j.optString("thumbnail_url", "");
@@ -1843,7 +2038,7 @@ public class MainActivity extends Activity {
                                         } else showError("Download failed");
                                     } catch (Exception e) { showError("Download failed"); }
                                 }
-                                @Override public void onError(String error) { showError("Download failed"); }
+                                @Override public void onError(String error) { endTask(2000); showError("Download failed"); }
                                 
                                 private void showError(String msg) {
                                     pb.setVisibility(View.GONE);
@@ -1936,10 +2131,10 @@ public class MainActivity extends Activity {
     }
 
     private void loadLibrary() {
-        showLoading("Loading Library...");
+        final int loadId = startLoading("Loading Library...");
         api.get("/api/spotify/library/hierarchy", new ApiClient.Callback() {
             @Override public void onSuccess(String response) {
-                hideLoading();
+                stopLoading(loadId);
                 try {
                     JSONObject json = new JSONObject(response);
                     cachedLibraryItems = json.optJSONArray("items");
@@ -1948,7 +2143,7 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {}
             }
             @Override public void onError(String error) {
-                hideLoading();
+                stopLoading(loadId);
                 showToast("Failed to load library", false);
             }
         });
@@ -2098,9 +2293,10 @@ public class MainActivity extends Activity {
                             }
                             
                             pb.setVisibility(View.VISIBLE);
-                            
+                            beginTask(false);
                             api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(finalArtUriToLoad), new ApiClient.Callback() {
                                 @Override public void onSuccess(String response) {
+                                    endTask(2000);
                                     try {
                                         JSONObject j = new JSONObject(response);
                                         final String imgUrl = j.optString("thumbnail_url", "");
@@ -2134,7 +2330,7 @@ public class MainActivity extends Activity {
                                         } else showError("Download failed");
                                     } catch (Exception e) { showError("Download failed"); }
                                 }
-                                @Override public void onError(String error) { showError("Download failed"); }
+                                @Override public void onError(String error) { endTask(2000); showError("Download failed"); }
                                 
                                 private void showError(String msg) {
                                     pb.setVisibility(View.GONE);
@@ -2218,13 +2414,17 @@ public class MainActivity extends Activity {
                     styleDynamicButton(removeBtn);
                     removeBtn.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) {
+                            final int remLoadId = startLoading("Removing from Library...");
                             api.get("/api/spotify/library/remove?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
                                 @Override public void onSuccess(String response) {
+                                    stopLoading(remLoadId);
                                     runOnUiThread(new Runnable() {
                                         @Override public void run() { loadLibrary(); }
                                     });
                                 }
-                                @Override public void onError(String error) {}
+                                @Override public void onError(String error) {
+                                    stopLoading(remLoadId);
+                                }
                             });
                         }
                     });
@@ -2238,11 +2438,11 @@ public class MainActivity extends Activity {
     }
 
     private void loadQueue() {
-        showLoading("Loading Queue...");
+        final int loadId = startLoading("Loading Queue...");
         api.get("/api/spotify/queue", new ApiClient.Callback() {
             @Override
             public void onSuccess(String response) {
-                hideLoading();
+                stopLoading(loadId);
                 LinearLayout container = (LinearLayout) findViewById(R.id.queue_content);
                 clearContainerViews(container);
                 try {
@@ -2315,9 +2515,10 @@ public class MainActivity extends Activity {
                                         }
                                         
                                         pb.setVisibility(View.VISIBLE);
-                                        
+                                        beginTask(false);
                                         api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
                                             @Override public void onSuccess(String response) {
+                                                endTask(2000);
                                                 try {
                                                     JSONObject j = new JSONObject(response);
                                                     final String imgUrl = j.optString("thumbnail_url", "");
@@ -2351,7 +2552,7 @@ public class MainActivity extends Activity {
                                                     } else showError("Download failed");
                                                 } catch (Exception e) { showError("Download failed"); }
                                             }
-                                            @Override public void onError(String error) { showError("Download failed"); }
+                                            @Override public void onError(String error) { endTask(2000); showError("Download failed"); }
                                             
                                             private void showError(String msg) {
                                                 pb.setVisibility(View.GONE);
@@ -2419,7 +2620,7 @@ public class MainActivity extends Activity {
                     container.addView(err);
                 }
             }
-            @Override public void onError(String error) { hideLoading(); showToast("Queue load failed", false); }
+            @Override public void onError(String error) { stopLoading(loadId); showToast("Queue load failed", false); }
         });
     }
 
@@ -2735,29 +2936,30 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void sendCommand(String endpoint) {
-        showLoading("Waiting for PC...");
+    private void sendCommand(final String endpoint) {
+        final boolean isPlaybackChange = endpoint.contains("spotify_next") ||
+            endpoint.contains("spotify_prev") ||
+            endpoint.contains("spotify_play_pause") ||
+            endpoint.contains("/api/spotify/play");
+        final boolean isTrackChange = endpoint.contains("spotify_next") ||
+            endpoint.contains("spotify_prev") ||
+            endpoint.contains("/api/spotify/play");
+        final int loadId = startLoading("Waiting for PC...", isPlaybackChange);
         api.get(endpoint, new ApiClient.Callback() {
             @Override
             public void onSuccess(String response) {
-                hideLoading();
+                if (isTrackChange && api != null) {
+                    fetchSongInfoNow();
+                }
+                stopLoading(loadId);
                 showToast("Successfully completed", true);
             }
             @Override
             public void onError(String error) {
-                hideLoading();
+                stopLoading(loadId);
                 showToast("Failed: " + error, false);
             }
         });
-    }
-
-    private void showLoading(String text) {
-        loadingText.setText(text);
-        loadingOverlay.setVisibility(View.VISIBLE);
-    }
-
-    private void hideLoading() {
-        loadingOverlay.setVisibility(View.GONE);
     }
 
     private void showToast(String text, boolean success) {
@@ -2809,8 +3011,10 @@ public class MainActivity extends Activity {
             return;
         }
         
+        beginTask(false);
         api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
             @Override public void onSuccess(String response) {
+                endTask(2000);
                 try {
                     JSONObject json = new JSONObject(response);
                     final String imgUrl = json.optString("thumbnail_url", "");
@@ -2849,7 +3053,7 @@ public class MainActivity extends Activity {
                     }
                 } catch (Exception e) { showErrorState("Failed to download"); }
             }
-            @Override public void onError(String error) { showErrorState("Failed to download"); }
+            @Override public void onError(String error) { endTask(2000); showErrorState("Failed to download"); }
             
             private void loadHighResIfNeeded(final String highResUrl, final String currentImgUrl) {
                 if (highResUrl != null && !highResUrl.isEmpty() && !highResUrl.equals(currentImgUrl)) {
@@ -2974,13 +3178,13 @@ public class MainActivity extends Activity {
         if (api == null) {
             return;
         }
-        showLoading("Loading Lyrics...");
+        final int loadId = startLoading("Loading Lyrics...");
 
         String url = "/api/spotify/lyrics?track=" + java.net.URLEncoder.encode(track) + "&artist=" + java.net.URLEncoder.encode(artist);
         api.get(url, new ApiClient.Callback() {
             @Override
             public void onSuccess(String response) {
-                hideLoading();
+                stopLoading(loadId);
                 try {
                     JSONObject json = new JSONObject(response);
                     if (json.has("status") && json.optString("status").equals("error")) {
@@ -3063,7 +3267,7 @@ public class MainActivity extends Activity {
             }
             @Override
             public void onError(final String error) {
-                hideLoading();
+                stopLoading(loadId);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {

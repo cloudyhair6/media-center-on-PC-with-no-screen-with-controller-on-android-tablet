@@ -67,7 +67,22 @@ class _RemoteHandler(BaseHTTPRequestHandler):
 
         # API: command
         if path.startswith("/api/command/"):
-            cmd = path.split("/api/command/", 1)[1]
+            cmd = path.split("/api/command/", 1)[1].split("?")[0]
+            if cmd in ("spotify_play_pause", "spotify_next", "spotify_prev", "spotify_launch"):
+                try:
+                    from backend.spotify_control import SpotifyControl
+                    if cmd == "spotify_play_pause":
+                        SpotifyControl.play_pause()
+                    elif cmd == "spotify_next":
+                        SpotifyControl.next_track()
+                    elif cmd == "spotify_prev":
+                        SpotifyControl.prev_track()
+                    elif cmd == "spotify_launch":
+                        SpotifyControl.launch()
+                    self._json_response(200, {"ok": True, "command": cmd})
+                except Exception as e:
+                    self._json_response(500, {"ok": False, "error": str(e)})
+                return
             dispatcher: RemoteCommandDispatcher = self.server.dispatcher
             if dispatcher.dispatch(cmd):
                 # Include volume level in response for volume commands
