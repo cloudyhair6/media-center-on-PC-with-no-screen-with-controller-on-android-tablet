@@ -30,7 +30,7 @@ def create_app():
         key_func=get_remote_address,
         storage_uri=storage_uri,
         headers_enabled=True,
-        default_limits=["15 per minute"],
+        default_limits=["600 per minute"],
     )
     limiter.init_app(app)
     

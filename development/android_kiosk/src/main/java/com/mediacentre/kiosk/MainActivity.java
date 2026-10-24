@@ -83,11 +83,17 @@ public class MainActivity extends Activity {
     private ScrollView musicLyrics;
     private LinearLayout lyricsContent;
     private String currentLyricsTrack = "";
+    private String currentLyricsArtist = "";
+    private String currentlyFetchingLyricsTrack = "";
+    private String currentlyFetchingLyricsArtist = "";
+    private int lyricsSearchGeneration = 0;
+    private int currentLyricsLoadId = -1;
     private java.util.List<LyricLine> currentLyrics = new java.util.ArrayList<>();
     private int currentLyricLineIndex = -1;
     private String currentNpUri = "";
     private String lastNpTitle = "";
     private String lastNpArtist = "";
+    private boolean lastIsAd = false;
     private String currentContextUri = "";
     private TextView npContext;
     private boolean isLiked = false;
@@ -237,7 +243,7 @@ public class MainActivity extends Activity {
     // Loading Stack & Background Poll Coordination
     private static class LoadingEntry {
         final int id;
-        final String text;
+        String text;
         LoadingEntry(int id, String text) {
             this.id = id;
             this.text = text;
@@ -348,6 +354,26 @@ public class MainActivity extends Activity {
         return id;
     }
 
+    private void updateLoadingText(final int id, final String newText) {
+        if (id <= 0) return;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                for (int i = activeLoadings.size() - 1; i >= 0; i--) {
+                    if (activeLoadings.get(i).id == id) {
+                        activeLoadings.get(i).text = newText;
+                        break;
+                    }
+                }
+                if (!activeLoadings.isEmpty()) {
+                    LoadingEntry top = activeLoadings.get(activeLoadings.size() - 1);
+                    if (loadingText != null) loadingText.setText(top.text);
+                    if (loadingOverlay != null) loadingOverlay.setVisibility(View.VISIBLE);
+                }
+            }
+        });
+    }
+
     private void stopLoading(final int id) {
         if (id <= 0) return;
         runOnUiThread(new Runnable() {
@@ -411,18 +437,27 @@ public class MainActivity extends Activity {
                 // Show connecting status quietly
                 updateConnectionStatus(STATUS_CONNECTING);
                 
-                // If the poll takes more than 2 seconds (usually when fetching new song metadata),
-                // fall back to showing the full-screen loading overlay.
+                // Only show the "Loading song info..." popup during background polling if:
+                // 1) We are on Now Playing AND within a few seconds of the start or end of the song, OR
+                // 2) We are on the Lyrics page and the song is near the start/end (changing song).
+                final boolean onNowPlaying = (musicNowPlayingContainer != null && musicNowPlayingContainer.getVisibility() == View.VISIBLE) ||
+                                             (musicNowPlaying != null && musicNowPlaying.getVisibility() == View.VISIBLE);
+                final boolean onLyrics = (musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE);
+                final boolean nearStartOrEnd = (currentLengthS <= 0) || (currentPositionS <= 5) || ((currentLengthS - currentPositionS) <= 5);
+                final boolean allowPollPopup = (onNowPlaying || onLyrics) && nearStartOrEnd;
+
                 final Runnable loadingFallback = new Runnable() {
                     @Override
                     public void run() {
-                        if (isSpotifyPolling && myPollGen == spotifyPollGeneration && currentPollLoadingId == -1) {
+                        if (allowPollPopup && isSpotifyPolling && myPollGen == spotifyPollGeneration && currentPollLoadingId == -1) {
                             currentPollLoadingId = startBackgroundLoading("Loading song info...");
                         }
                     }
                 };
                 currentPollFallback = loadingFallback;
-                handler.postDelayed(loadingFallback, 2000);
+                if (allowPollPopup) {
+                    handler.postDelayed(loadingFallback, 2000);
+                }
 
                 api.get("/api/spotify/now_playing", new ApiClient.Callback() {
                     @Override
@@ -517,7 +552,9 @@ public class MainActivity extends Activity {
             String artist = json.optString("artist", "");
             String album = json.optString("album", "");
             isNpPlaying = json.optBoolean("playing", false);
-            boolean isAd = json.optBoolean("is_ad", false);
+            boolean isAd = json.optBoolean("is_ad", false) ||
+                           "Advertisement".equalsIgnoreCase(title) ||
+                           "Advertisement".equalsIgnoreCase(artist);
             
             // Check for Spotify CLI crash / connection failure
             if (title.toLowerCase().contains("failed to connect") || title.toLowerCase().contains("client connection failed")) {
@@ -585,30 +622,66 @@ public class MainActivity extends Activity {
             boolean trackChanged = false;
             if (!uri.isEmpty() && !uri.equals(currentNpUri)) {
                 trackChanged = true;
-                currentNpUri = uri;
-            } else if (uri.isEmpty() && (!title.equals(lastNpTitle) || !artist.equals(lastNpArtist))) {
+            }
+            if (!title.equals(lastNpTitle) || !artist.equals(lastNpArtist) || (isAd != lastIsAd)) {
                 trackChanged = true;
             }
+            currentNpUri = uri;
+            lastNpTitle = title;
+            lastNpArtist = artist;
+            lastIsAd = isAd;
 
             if (trackChanged) {
-                lastNpTitle = title;
-                lastNpArtist = artist;
-
                 if (prefs.getBoolean("show_album_art", true)) {
                     loadAlbumArt(currentNpUri);
                 }
-                if (!currentNpUri.isEmpty()) {
+                if (!currentNpUri.isEmpty() && !isAd) {
                     checkIfLiked(currentNpUri);
                 }
+            }
 
-                if (musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE) {
-                    if (!isAd && !title.isEmpty() && !title.equals("Not Playing") && !title.equals("Spotify") && !title.equals("Refreshing...")) {
+            if (musicLyrics != null && musicLyrics.getVisibility() == View.VISIBLE) {
+                if (isAd) {
+                    if (!"__AD__".equals(currentLyricsTrack)) {
+                        cancelLyricsSearch();
+                        currentLyricsTrack = "__AD__";
+                        currentLyricsArtist = "";
+                        currentLyrics.clear();
+                        currentLyricLineIndex = -1;
+                        if (lyricsContent != null) {
+                            clearContainerViews(lyricsContent);
+                            TextView tv = new TextView(MainActivity.this);
+                            tv.setText("Advertisement playing");
+                            tv.setTextColor(0xFF8892b0);
+                            tv.setTextSize(18);
+                            tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                            tv.setPadding(0, 40, 0, 0);
+                            lyricsContent.addView(tv);
+                        }
+                    }
+                } else if (title.isEmpty() || title.equals("Not Playing") || title.equals("Spotify") || title.equals("Refreshing...")) {
+                    if (!"__NONE__".equals(currentLyricsTrack)) {
+                        cancelLyricsSearch();
+                        currentLyricsTrack = "__NONE__";
+                        currentLyricsArtist = "";
+                        currentLyrics.clear();
+                        currentLyricLineIndex = -1;
+                        if (lyricsContent != null) {
+                            clearContainerViews(lyricsContent);
+                            TextView tv = new TextView(MainActivity.this);
+                            tv.setText("No song currently playing");
+                            tv.setTextColor(0xFF8892b0);
+                            tv.setTextSize(18);
+                            tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                            tv.setPadding(0, 40, 0, 0);
+                            lyricsContent.addView(tv);
+                        }
+                    }
+                } else if (trackChanged || !title.equals(currentLyricsTrack) || !artist.equals(currentLyricsArtist)) {
+                    if (!title.equals(currentlyFetchingLyricsTrack) || !artist.equals(currentlyFetchingLyricsArtist)) {
                         fetchLyrics(title, artist);
                     }
                 }
-            } else {
-                lastNpTitle = title;
-                lastNpArtist = artist;
             }
 
             // Sync shuffle and repeat states
@@ -695,7 +768,12 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // Display non-blocking in-container loading indicator if lyrics not yet loaded
+        // If previous search found no lyrics, allow manual tab open to retry
+        if (currentLyrics.isEmpty() && !"__AD__".equals(currentLyricsTrack)) {
+            currentLyricsTrack = "";
+            currentLyricsArtist = "";
+        }
+
         if (currentLyrics.isEmpty() || (npTitle != null && !npTitle.getText().toString().equals(currentLyricsTrack))) {
             if (lyricsContent != null) {
                 clearContainerViews(lyricsContent);
@@ -709,8 +787,8 @@ public class MainActivity extends Activity {
             }
         }
 
-        // Actively query /api/spotify/now_playing with force=true to get fresh track state
-        final int checkLoadId = startLoading("Loading Lyrics...");
+        // First connect to PC and update current song info, then fetchLyrics will step through 1/6..6/6
+        final int checkLoadId = startLoading("Loading song info...");
         api.get("/api/spotify/now_playing?force=true", new ApiClient.Callback() {
             @Override
             public void onSuccess(final String response) {
@@ -723,41 +801,15 @@ public class MainActivity extends Activity {
 
                             String title = json.optString("title", "");
                             String artist = json.optString("artist", "");
-                            boolean isAd = json.optBoolean("is_ad", false);
+                            boolean isAd = json.optBoolean("is_ad", false) ||
+                                           "Advertisement".equalsIgnoreCase(title) ||
+                                           "Advertisement".equalsIgnoreCase(artist);
 
-                            if (isAd) {
-                                currentLyricsTrack = "";
-                                currentLyrics.clear();
-                                currentLyricLineIndex = -1;
-                                if (lyricsContent != null) {
-                                    clearContainerViews(lyricsContent);
-                                    TextView tv = new TextView(MainActivity.this);
-                                    tv.setText("Advertisement playing");
-                                    tv.setTextColor(0xFF8892b0);
-                                    tv.setTextSize(18);
-                                    tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                                    tv.setPadding(0, 40, 0, 0);
-                                    lyricsContent.addView(tv);
-                                }
-                            } else if (title.isEmpty() || title.equals("Not Playing") || title.equals("Spotify") || title.equals("Refreshing...")) {
-                                currentLyricsTrack = "";
-                                currentLyrics.clear();
-                                currentLyricLineIndex = -1;
-                                if (lyricsContent != null) {
-                                    clearContainerViews(lyricsContent);
-                                    TextView tv = new TextView(MainActivity.this);
-                                    tv.setText("No song currently playing");
-                                    tv.setTextColor(0xFF8892b0);
-                                    tv.setTextSize(18);
-                                    tv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                                    tv.setPadding(0, 40, 0, 0);
-                                    lyricsContent.addView(tv);
-                                }
-                            } else {
-                                if (!title.equals(currentLyricsTrack) || currentLyrics.isEmpty()) {
+                            if (!isAd && !title.isEmpty() && !title.equals("Not Playing") && !title.equals("Spotify") && !title.equals("Refreshing...")) {
+                                if ((!title.equals(currentLyricsTrack) || !artist.equals(currentLyricsArtist) || currentLyrics.isEmpty()) &&
+                                    (!title.equals(currentlyFetchingLyricsTrack) || !artist.equals(currentlyFetchingLyricsArtist))) {
                                     fetchLyrics(title, artist);
-                                } else {
-                                    // Track already loaded: update sync position immediately
+                                } else if (!currentLyrics.isEmpty()) {
                                     updateLyricsSync(currentPositionMs);
                                 }
                             }
@@ -3147,11 +3199,42 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void cancelLyricsSearch() {
+        lyricsSearchGeneration++;
+        currentlyFetchingLyricsTrack = "";
+        currentlyFetchingLyricsArtist = "";
+        if (currentLyricsLoadId != -1) {
+            int oldId = currentLyricsLoadId;
+            currentLyricsLoadId = -1;
+            stopLoading(oldId);
+        }
+    }
+
+    private void showLyricsNotFound() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (lyricsContent != null) {
+                    clearContainerViews(lyricsContent);
+                    TextView error = new TextView(MainActivity.this);
+                    error.setText("Lyrics not found");
+                    error.setTextColor(0xFF8892b0);
+                    error.setTextSize(18);
+                    error.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                    error.setPadding(0, 40, 0, 0);
+                    lyricsContent.addView(error);
+                }
+            }
+        });
+    }
+
     private void fetchLyrics(final String track, final String artist) {
         if (track == null || track.isEmpty() || artist == null || artist.isEmpty() || 
-            track.equals("Advertisement") || track.equals("Not Playing") || 
-            track.equals("Refreshing...") || track.equals("Spotify")) {
+            track.equalsIgnoreCase("Advertisement") || artist.equalsIgnoreCase("Advertisement") ||
+            track.equals("Not Playing") || track.equals("Refreshing...") || track.equals("Spotify")) {
+            cancelLyricsSearch();
             currentLyricsTrack = "";
+            currentLyricsArtist = "";
             currentLyrics.clear();
             currentLyricLineIndex = -1;
             if (lyricsContent != null) {
@@ -3159,143 +3242,151 @@ public class MainActivity extends Activity {
             }
             return;
         }
-        if (track.equals(currentLyricsTrack) && currentLyrics.size() > 0) {
+        if (track.equals(currentLyricsTrack) && artist.equals(currentLyricsArtist) && currentLyrics.size() > 0) {
             return;
         }
-        currentLyricsTrack = track;
+        if (track.equals(currentlyFetchingLyricsTrack) && artist.equals(currentlyFetchingLyricsArtist)) {
+            return;
+        }
+
+        cancelLyricsSearch();
+        final int myGen = ++lyricsSearchGeneration;
+        currentlyFetchingLyricsTrack = track;
+        currentlyFetchingLyricsArtist = artist;
         currentLyrics.clear();
         currentLyricLineIndex = -1;
+
+        final int[] sourceIds = new int[]{2, 3, 4, 5, 6, 7};
+        final String[] sourceNames = new String[]{"LRCLIB", "YouTube", "NetEase", "Megalobiz", "Musixmatch", "SimpMusic"};
+
+        final TextView loadingTv = new TextView(MainActivity.this);
+        loadingTv.setText("Searching for lyrics on " + sourceNames[0] + " 1/" + sourceNames.length + "...");
+        loadingTv.setTextColor(0xFF8892b0);
+        loadingTv.setTextSize(18);
+        loadingTv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        loadingTv.setPadding(0, 40, 0, 0);
+
         if (lyricsContent != null) {
             clearContainerViews(lyricsContent);
-            TextView loadingTv = new TextView(MainActivity.this);
-            loadingTv.setText("Loading lyrics for \"" + track + "\"...");
-            loadingTv.setTextColor(0xFF8892b0);
-            loadingTv.setTextSize(18);
-            loadingTv.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-            loadingTv.setPadding(0, 40, 0, 0);
             lyricsContent.addView(loadingTv);
         }
         if (api == null) {
+            currentlyFetchingLyricsTrack = "";
+            currentlyFetchingLyricsArtist = "";
             return;
         }
-        final int loadId = startLoading("Loading Lyrics...");
 
-        String url = "/api/spotify/lyrics?track=" + java.net.URLEncoder.encode(track) + "&artist=" + java.net.URLEncoder.encode(artist);
+        final int loadId = startLoading("Searching for lyrics on " + sourceNames[0] + " 1/" + sourceNames.length + "...");
+        currentLyricsLoadId = loadId;
+
+        fetchLyricsFromSource(track, artist, 0, sourceIds, sourceNames, loadId, myGen, loadingTv);
+    }
+
+    private void fetchLyricsFromSource(
+        final String track,
+        final String artist,
+        final int stepIndex,
+        final int[] sourceIds,
+        final String[] sourceNames,
+        final int loadId,
+        final int myGen,
+        final TextView loadingTv
+    ) {
+        if (myGen != lyricsSearchGeneration || api == null) {
+            return;
+        }
+        final String progressText = "Searching for lyrics on " + sourceNames[stepIndex] + " " + (stepIndex + 1) + "/" + sourceNames.length + "...";
+        updateLoadingText(loadId, progressText);
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (loadingTv != null) {
+                    loadingTv.setText(progressText);
+                }
+            }
+        });
+
+        String url = "/api/spotify/lyrics?track=" + java.net.URLEncoder.encode(track) +
+                     "&artist=" + java.net.URLEncoder.encode(artist) +
+                     "&source=" + sourceIds[stepIndex];
+
         api.get(url, new ApiClient.Callback() {
             @Override
             public void onSuccess(String response) {
-                stopLoading(loadId);
+                if (myGen != lyricsSearchGeneration) return;
+                boolean found = false;
                 try {
                     JSONObject json = new JSONObject(response);
-                    if (json.has("status") && json.optString("status").equals("error")) {
-                        final String errMsg = json.has("error") ? json.optJSONObject("error").optString("message", "Error") : json.optString("message", "Error");
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (lyricsContent != null) {
-                                    clearContainerViews(lyricsContent);
-                                    TextView error = new TextView(MainActivity.this);
-                                    error.setText(errMsg);
-                                    error.setTextColor(0xFF8892b0);
-                                    error.setTextSize(18);
-                                    error.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                                    error.setPadding(0, 40, 0, 0);
-                                    lyricsContent.addView(error);
-                                }
-                            }
-                        });
-                        return;
-                    }
-                    
-                    JSONObject data = json.optJSONObject("data");
-                    if (data == null) {
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (lyricsContent != null) {
-                                    clearContainerViews(lyricsContent);
-                                    TextView error = new TextView(MainActivity.this);
-                                    error.setText("No lyrics found.");
-                                    error.setTextColor(0xFF8892b0);
-                                    error.setTextSize(18);
-                                    error.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                                    error.setPadding(0, 40, 0, 0);
-                                    lyricsContent.addView(error);
-                                }
-                            }
-                        });
-                        return;
-                    }
-                    JSONArray timedLyrics = data.optJSONArray("timed_lyrics");
-                    if (timedLyrics != null && timedLyrics.length() > 0) {
-                        currentLyrics.clear();
-                        for (int i = 0; i < timedLyrics.length(); i++) {
-                            JSONObject obj = timedLyrics.optJSONObject(i);
-                            if (obj != null) {
-                                int timeMs = obj.optInt("start_time", -1);
-                                String text = obj.optString("text", "");
-                                currentLyrics.add(new LyricLine(timeMs, text));
-                            }
-                        }
-                        renderLyrics();
-                    } else {
-                        String synced = data.optString("lyrics", "");
-                        boolean hasTimestamps = data.optBoolean("hasTimestamps", true);
-                        if (synced.isEmpty()) {
-                            runOnUiThread(new Runnable() {
-                                @Override
-                                public void run() {
-                                    if (lyricsContent != null) {
-                                        clearContainerViews(lyricsContent);
-                                        TextView error = new TextView(MainActivity.this);
-                                        error.setText("No lyrics found.");
-                                        error.setTextColor(0xFF8892b0);
-                                        error.setTextSize(18);
-                                        error.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                                        error.setPadding(0, 40, 0, 0);
-                                        lyricsContent.addView(error);
+                    if ("success".equals(json.optString("status"))) {
+                        JSONObject data = json.optJSONObject("data");
+                        if (data != null) {
+                            JSONArray timedLyrics = data.optJSONArray("timed_lyrics");
+                            if (timedLyrics != null && timedLyrics.length() > 0) {
+                                currentLyrics.clear();
+                                for (int i = 0; i < timedLyrics.length(); i++) {
+                                    JSONObject obj = timedLyrics.optJSONObject(i);
+                                    if (obj != null) {
+                                        int timeMs = obj.optInt("start_time", -1);
+                                        String text = obj.optString("text", "");
+                                        currentLyrics.add(new LyricLine(timeMs, text));
                                     }
                                 }
-                            });
-                            return;
+                                if (!currentLyrics.isEmpty()) {
+                                    found = true;
+                                    currentlyFetchingLyricsTrack = "";
+                                    currentlyFetchingLyricsArtist = "";
+                                    currentLyricsTrack = track;
+                                    currentLyricsArtist = artist;
+                                    if (currentLyricsLoadId == loadId) currentLyricsLoadId = -1;
+                                    stopLoading(loadId);
+                                    renderLyrics();
+                                    return;
+                                }
+                            } else {
+                                String synced = data.optString("lyrics", "");
+                                boolean hasTimestamps = data.optBoolean("hasTimestamps", true);
+                                if (!synced.trim().isEmpty()) {
+                                    found = true;
+                                    currentlyFetchingLyricsTrack = "";
+                                    currentlyFetchingLyricsArtist = "";
+                                    currentLyricsTrack = track;
+                                    currentLyricsArtist = artist;
+                                    if (currentLyricsLoadId == loadId) currentLyricsLoadId = -1;
+                                    stopLoading(loadId);
+                                    parseLrc(synced, hasTimestamps);
+                                    return;
+                                }
+                            }
                         }
-                        parseLrc(synced, hasTimestamps);
                     }
                 } catch (Exception e) {
-                    android.util.Log.e("DEBUG", "Failed to parse lyrics JSON", e);
+                    android.util.Log.e("DEBUG", "Failed to parse lyrics step JSON", e);
+                }
+
+                if (!found) {
+                    advanceOrFinish();
                 }
             }
+
             @Override
-            public void onError(final String error) {
-                stopLoading(loadId);
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (lyricsContent != null) {
-                            clearContainerViews(lyricsContent);
-                            TextView errView = new TextView(MainActivity.this);
-                            String errMsg = "Error loading lyrics";
-                            if (error != null && !error.isEmpty()) {
-                                try {
-                                    JSONObject json = new JSONObject(error);
-                                    if (json.has("error")) {
-                                        errMsg = json.optJSONObject("error").optString("message", errMsg);
-                                    } else {
-                                        errMsg = json.optString("message", errMsg);
-                                    }
-                                } catch (Exception e) {
-                                    errMsg = error;
-                                }
-                            }
-                            errView.setText(errMsg);
-                            errView.setTextColor(0xFF8892b0);
-                            errView.setTextSize(18);
-                            errView.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                            errView.setPadding(0, 40, 0, 0);
-                            lyricsContent.addView(errView);
-                        }
-                    }
-                });
+            public void onError(String error) {
+                if (myGen != lyricsSearchGeneration) return;
+                advanceOrFinish();
+            }
+
+            private void advanceOrFinish() {
+                if (myGen != lyricsSearchGeneration) return;
+                if (stepIndex + 1 < sourceIds.length) {
+                    fetchLyricsFromSource(track, artist, stepIndex + 1, sourceIds, sourceNames, loadId, myGen, loadingTv);
+                } else {
+                    currentlyFetchingLyricsTrack = "";
+                    currentlyFetchingLyricsArtist = "";
+                    currentLyricsTrack = track;
+                    currentLyricsArtist = artist;
+                    if (currentLyricsLoadId == loadId) currentLyricsLoadId = -1;
+                    stopLoading(loadId);
+                    showLyricsNotFound();
+                }
             }
         });
     }

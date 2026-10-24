@@ -269,8 +269,11 @@ async def fetch_lyrics_controller(
             continue
 
         try:
-            raw = await maybe_await(
-                fetcher.fetch, artist_name, song_title, timestamps=timestamps
+            raw = await asyncio.wait_for(
+                maybe_await(
+                    fetcher.fetch, artist_name, song_title, timestamps=timestamps
+                ),
+                timeout=8,
             )
 
             if not raw or not raw.get("lyrics"):

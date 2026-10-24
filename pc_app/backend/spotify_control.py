@@ -380,12 +380,21 @@ class SpotifyControl:
                 shuffle = smtc_data.get("shuffle", False)
                 repeat = smtc_data.get("repeat", 0)
 
-                # Check if song changed
+                prev_pos_s = SpotifyControl._last_metadata.get("position_s", 0)
+                prev_len_s = SpotifyControl._last_metadata.get("length_s", 0)
+                pos_reset = (not SpotifyControl._last_seek_is_active) and (prev_pos_s > 5 and pos_s <= 4)
+                near_boundary = (pos_s <= 4) or (len_s > 0 and (len_s - pos_s) <= 3)
+
+                # Check if song changed (also re-verify via CLI near boundaries, on length/pos reset, or during ads)
                 song_changed = (
                     force_fetch or
                     title != SpotifyControl._last_title or
                     artist != SpotifyControl._last_artist or
-                    not SpotifyControl._last_metadata.get("title")
+                    not SpotifyControl._last_metadata.get("title") or
+                    (len_s > 0 and prev_len_s > 0 and len_s != prev_len_s) or
+                    pos_reset or
+                    near_boundary or
+                    SpotifyControl._last_metadata.get("is_ad", False)
                 )
 
                 if not song_changed and title != "":
@@ -399,28 +408,43 @@ class SpotifyControl:
                     SpotifyControl._last_metadata["repeat"] = repeat
                     return SpotifyControl._last_metadata
 
-                # Song has changed or empty title: Enrich with CLI for URI, Artwork, Context
-                SpotifyControl._last_title = title
-                SpotifyControl._last_artist = artist
-                if album:
-                    SpotifyControl._last_album = album
-
+                # Song has changed or boundary check: Enrich with CLI for URI, Artwork, Context, and Ad state
                 cli_output = SpotifyControl._run_cli(["now-playing", "--format", "json"])
                 uri = ""
                 context_desc = ""
-                is_ad = False
+                is_ad = title.lower() == "advertisement" or artist.lower() == "advertisement"
 
                 if cli_output:
                     try:
                         cli_json = json.loads(cli_output)
                         cp = cli_json.get("currently_playing", {})
+                        cli_title = ""
+                        cli_artist = ""
                         if not cp and "track" in cli_json:
                             # Alternate CLI format
                             track = cli_json.get("track", {})
                             uri = track.get("uri", "")
+                            cli_title = track.get("name", "").strip()
+                            artists_list = track.get("artists", [])
+                            cli_artist = artists_list[0].get("name", "").strip() if artists_list else ""
                         else:
                             uri = cp.get("uri", "")
-                        is_ad = uri.startswith("spotify:ad:")
+                            desc = cp.get("description", "")
+                            for dash in [" — ", " – ", " - ", " ÔÇö "]:
+                                if dash in desc:
+                                    parts = desc.split(dash, 1)
+                                    cli_title = parts[0].strip()
+                                    cli_artist = parts[1].strip()
+                                    break
+                        is_ad = is_ad or uri.startswith("spotify:ad:") or cli_title.lower() == "advertisement"
+                        if is_ad:
+                            title = "Advertisement"
+                            artist = "Advertisement"
+                            album = ""
+                        elif cli_title and (not title or (uri and uri != SpotifyControl._last_uri and title == SpotifyControl._last_title)):
+                            title = cli_title
+                            if cli_artist:
+                                artist = cli_artist
 
                         # Context handling
                         ctx_obj = cp.get("context", {}) if cp else {}
@@ -446,8 +470,22 @@ class SpotifyControl:
                     except Exception:
                         pass
 
+                if title != SpotifyControl._last_title or artist != SpotifyControl._last_artist or is_ad:
+                    if not uri or uri == SpotifyControl._last_uri:
+                        SpotifyControl._last_uri = ""
+                    SpotifyControl._last_artwork_url = ""
+                    SpotifyControl._last_album = album if not is_ad else ""
+
+                SpotifyControl._last_title = title
+                SpotifyControl._last_artist = artist
+                if album and not is_ad:
+                    SpotifyControl._last_album = album
+
                 # Artwork resolution
-                if uri and uri != SpotifyControl._last_uri:
+                if is_ad:
+                    SpotifyControl._last_uri = uri
+                    SpotifyControl._last_artwork_url = ""
+                elif uri and uri != SpotifyControl._last_uri:
                     SpotifyControl._last_uri = uri
                     try:
                         lookup_out = SpotifyControl._run_cli(["lookup", uri, "--format", "json"])
@@ -463,9 +501,9 @@ class SpotifyControl:
 
                 SpotifyControl._last_metadata = {
                     "playing": is_playing,
-                    "title": title if title else ("Advertisement" if is_ad else "Spotify"),
-                    "artist": artist if artist else ("Advertisement" if is_ad else ""),
-                    "album": SpotifyControl._last_album if SpotifyControl._last_album else album,
+                    "title": "Advertisement" if is_ad else (title if title else "Spotify"),
+                    "artist": "Advertisement" if is_ad else artist,
+                    "album": "" if is_ad else (SpotifyControl._last_album if SpotifyControl._last_album else album),
                     "context": SpotifyControl._last_context_desc,
                     "context_uri": SpotifyControl._last_context_uri,
                     "uri": uri if uri else SpotifyControl._last_uri,

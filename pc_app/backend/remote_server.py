@@ -137,19 +137,23 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 qs = parse_qs(urlparse(self.path).query)
                 track = qs.get("track", [""])[0]
                 artist = qs.get("artist", [""])[0]
-                url = f"http://127.0.0.1:9999/lyrics/?song={urllib.parse.quote(track)}&artist={urllib.parse.quote(artist)}&timestamps=true"
+                source = qs.get("source", [""])[0].strip()
+                if source:
+                    url = f"http://127.0.0.1:9999/lyrics/?song={urllib.parse.quote(track)}&artist={urllib.parse.quote(artist)}&timestamps=true&pass=true&sequence={urllib.parse.quote(source)}"
+                else:
+                    url = f"http://127.0.0.1:9999/lyrics/?song={urllib.parse.quote(track)}&artist={urllib.parse.quote(artist)}&timestamps=true"
                 req = urllib.request.Request(url)
-                with urllib.request.urlopen(req, timeout=10) as response:
+                with urllib.request.urlopen(req, timeout=12) as response:
                     data = json.loads(response.read().decode('utf-8'))
                     self._json_response(200, data)
             except urllib.error.HTTPError as e:
                 try:
                     data = json.loads(e.read().decode('utf-8'))
-                    self._json_response(e.code, data)
+                    self._json_response(200, data)
                 except Exception:
-                    self._json_response(e.code, {"status": "error", "message": str(e)})
-            except Exception as e:
-                self._json_response(500, {"status": "error", "message": str(e)})
+                    self._json_response(200, {"status": "error", "error": {"message": "Lyrics not found"}, "message": "Lyrics not found"})
+            except Exception:
+                self._json_response(200, {"status": "error", "error": {"message": "Lyrics not found"}, "message": "Lyrics not found"})
             return
 
         # API: Spotify search

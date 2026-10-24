@@ -277,9 +277,10 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"Failed to record user query: {str(e)}")
 
-        # 1. Check Cache First
+        # 1. Check Cache First (check global song cache first so step 1/6 hits cache from any source)
+        global_cache_key = make_cache_key(artist, song, timestamps, None, False, analyze_mood, include_metadata)
         cache_key = make_cache_key(artist, song, timestamps, sequence, fast_mode, analyze_mood, include_metadata)
-        cached = load_from_cache(cache_key)
+        cached = load_from_cache(global_cache_key) or load_from_cache(cache_key)
 
         if cached:
             logger.info(f"Cache hit for {artist} - {song}")
@@ -381,6 +382,7 @@ def register_routes(app):
             if data.get("lyrics") or data.get("plain_lyrics") or data.get("lyrics_text"):
                 try:
                     save_to_cache(cache_key, result)
+                    save_to_cache(global_cache_key, result)
                     logger.info(f"Result cached for {artist} - {song}")
                 except Exception as e:
                     logger.warning(f"Cache save failed: {str(e)}")
