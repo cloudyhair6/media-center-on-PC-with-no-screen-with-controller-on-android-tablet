@@ -1015,15 +1015,82 @@ public class MainActivity extends Activity {
         return Math.max(1, inSampleSize);
     }
 
-    private static byte[] downloadUrlToBytes(String urlStr) {
+    private static javax.net.ssl.SSLSocketFactory trustAllSocketFactory = null;
+    private static javax.net.ssl.HostnameVerifier trustAllHostnameVerifier = null;
+
+    private static synchronized void ensureTrustAllSsl() {
+        if (trustAllSocketFactory != null && trustAllHostnameVerifier != null) {
+            return;
+        }
+        try {
+            javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
+                new javax.net.ssl.X509TrustManager() {
+                    @Override
+                    public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+                        return new java.security.cert.X509Certificate[0];
+                    }
+                    @Override
+                    public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                    @Override
+                    public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                }
+            };
+            javax.net.ssl.SSLContext sc = javax.net.ssl.SSLContext.getInstance("TLS");
+            sc.init(null, trustAllCerts, new java.security.SecureRandom());
+            trustAllSocketFactory = sc.getSocketFactory();
+            trustAllHostnameVerifier = new javax.net.ssl.HostnameVerifier() {
+                @Override
+                public boolean verify(String hostname, javax.net.ssl.SSLSession session) {
+                    return true;
+                }
+            };
+            javax.net.ssl.HttpsURLConnection.setDefaultSSLSocketFactory(trustAllSocketFactory);
+            javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier(trustAllHostnameVerifier);
+        } catch (Exception ignored) {}
+    }
+
+    private static byte[] downloadUrlToBytesRaw(String urlStr) {
+        ensureTrustAllSsl();
         InputStream is = null;
         ByteArrayOutputStream baos = null;
         HttpURLConnection conn = null;
         try {
-            URL url = new URL(urlStr);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(30000);
-            conn.setReadTimeout(30000);
+            String currentUrl = urlStr;
+            for (int redirectCount = 0; redirectCount < 5; redirectCount++) {
+                URL url = new URL(currentUrl);
+                conn = (HttpURLConnection) url.openConnection();
+                if (conn instanceof javax.net.ssl.HttpsURLConnection) {
+                    javax.net.ssl.HttpsURLConnection httpsConn = (javax.net.ssl.HttpsURLConnection) conn;
+                    if (trustAllSocketFactory != null) {
+                        httpsConn.setSSLSocketFactory(trustAllSocketFactory);
+                    }
+                    if (trustAllHostnameVerifier != null) {
+                        httpsConn.setHostnameVerifier(trustAllHostnameVerifier);
+                    }
+                }
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+                conn.setRequestProperty("Accept", "image/jpeg,image/png,image/*,*/*;q=0.8");
+
+                int responseCode = conn.getResponseCode();
+                if (responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+                    responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+                    responseCode == HttpURLConnection.HTTP_SEE_OTHER ||
+                    responseCode == 307 || responseCode == 308) {
+                    String location = conn.getHeaderField("Location");
+                    conn.disconnect();
+                    conn = null;
+                    if (location == null || location.isEmpty()) {
+                        break;
+                    }
+                    currentUrl = new URL(url, location).toString();
+                    continue;
+                }
+                break;
+            }
+            if (conn == null) return null;
             is = conn.getInputStream();
             baos = new ByteArrayOutputStream();
             byte[] buf = new byte[2048];
@@ -1039,6 +1106,37 @@ public class MainActivity extends Activity {
             if (is != null) try { is.close(); } catch (Exception ignored) {}
             if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
         }
+    }
+
+    private byte[] downloadUrlToBytes(String urlStr) {
+        byte[] data = downloadUrlToBytesRaw(urlStr);
+        if (data != null && data.length > 0) {
+            return data;
+        }
+        // Fallback: proxy image download through the PC server if direct download failed
+        if (currentIp != null && !currentIp.isEmpty() && urlStr != null && !urlStr.contains("/api/image_download")) {
+            try {
+                String proxyUrl = "http://" + currentIp + ":8080/api/image_download?url=" + java.net.URLEncoder.encode(urlStr, "UTF-8");
+                return downloadUrlToBytesRaw(proxyUrl);
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    private Bitmap downloadAndDecodeBitmap(String urlStr, int reqWidth, int reqHeight, boolean pixelPerfect) {
+        byte[] data = downloadUrlToBytesRaw(urlStr);
+        Bitmap b = decodeSampledBitmapFromBytes(data, reqWidth, reqHeight, pixelPerfect);
+        if (b != null) {
+            return b;
+        }
+        if (currentIp != null && !currentIp.isEmpty() && urlStr != null && !urlStr.contains("/api/image_download")) {
+            try {
+                String proxyUrl = "http://" + currentIp + ":8080/api/image_download?url=" + java.net.URLEncoder.encode(urlStr, "UTF-8");
+                byte[] proxyData = downloadUrlToBytesRaw(proxyUrl);
+                return decodeSampledBitmapFromBytes(proxyData, reqWidth, reqHeight, pixelPerfect);
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
     private void clearContainerViews(ViewGroup container) {
@@ -2070,8 +2168,7 @@ public class MainActivity extends Activity {
                                             }
                                             new AsyncTask<Void, Void, Bitmap>() {
                                                 @Override protected Bitmap doInBackground(Void... voids) {
-                                                    byte[] data = downloadUrlToBytes(imgUrl);
-                                                    return decodeSampledBitmapFromBytes(data, 100, 100);
+                                                    return downloadAndDecodeBitmap(imgUrl, 100, 100, false);
                                                 }
                                                 @Override protected void onPostExecute(Bitmap b) {
                                                     pb.setVisibility(View.GONE);
@@ -2087,10 +2184,10 @@ public class MainActivity extends Activity {
                                                     }
                                                 }
                                             }.execute();
-                                        } else showError("Download failed");
-                                    } catch (Exception e) { showError("Download failed"); }
+                                        } else showError("URL missing");
+                                    } catch (Exception e) { showError("URL missing"); }
                                 }
-                                @Override public void onError(String error) { endTask(2000); showError("Download failed"); }
+                                @Override public void onError(String error) { endTask(2000); showError("URL missing"); }
                                 
                                 private void showError(String msg) {
                                     pb.setVisibility(View.GONE);
@@ -2362,8 +2459,7 @@ public class MainActivity extends Activity {
                                             }
                                             new AsyncTask<Void, Void, Bitmap>() {
                                                 @Override protected Bitmap doInBackground(Void... voids) {
-                                                    byte[] data = downloadUrlToBytes(imgUrl);
-                                                    return decodeSampledBitmapFromBytes(data, 100, 100);
+                                                    return downloadAndDecodeBitmap(imgUrl, 100, 100, false);
                                                 }
                                                 @Override protected void onPostExecute(Bitmap b) {
                                                     pb.setVisibility(View.GONE);
@@ -2379,10 +2475,10 @@ public class MainActivity extends Activity {
                                                     }
                                                 }
                                             }.execute();
-                                        } else showError("Download failed");
-                                    } catch (Exception e) { showError("Download failed"); }
+                                        } else showError("URL missing");
+                                    } catch (Exception e) { showError("URL missing"); }
                                 }
-                                @Override public void onError(String error) { endTask(2000); showError("Download failed"); }
+                                @Override public void onError(String error) { endTask(2000); showError("URL missing"); }
                                 
                                 private void showError(String msg) {
                                     pb.setVisibility(View.GONE);
@@ -2584,8 +2680,7 @@ public class MainActivity extends Activity {
                                                         }
                                                         new AsyncTask<Void, Void, Bitmap>() {
                                                             @Override protected Bitmap doInBackground(Void... voids) {
-                                                                byte[] data = downloadUrlToBytes(imgUrl);
-                                                                return decodeSampledBitmapFromBytes(data, 100, 100);
+                                                                return downloadAndDecodeBitmap(imgUrl, 100, 100, false);
                                                             }
                                                             @Override protected void onPostExecute(Bitmap b) {
                                                                 pb.setVisibility(View.GONE);
@@ -2601,10 +2696,10 @@ public class MainActivity extends Activity {
                                                                 }
                                                             }
                                                         }.execute();
-                                                    } else showError("Download failed");
-                                                } catch (Exception e) { showError("Download failed"); }
+                                                    } else showError("URL missing");
+                                                } catch (Exception e) { showError("URL missing"); }
                                             }
-                                            @Override public void onError(String error) { endTask(2000); showError("Download failed"); }
+                                            @Override public void onError(String error) { endTask(2000); showError("URL missing"); }
                                             
                                             private void showError(String msg) {
                                                 pb.setVisibility(View.GONE);
@@ -3082,8 +3177,7 @@ public class MainActivity extends Activity {
                         }
                         new AsyncTask<Void, Void, Bitmap>() {
                             @Override protected Bitmap doInBackground(Void... voids) {
-                                byte[] data = downloadUrlToBytes(imgUrl);
-                                return decodeSampledBitmapFromBytes(data, 500, 500, pixelPerfect);
+                                return downloadAndDecodeBitmap(imgUrl, 500, 500, pixelPerfect);
                             }
                             @Override protected void onPostExecute(Bitmap b) {
                                 if (b != null) {
@@ -3095,17 +3189,17 @@ public class MainActivity extends Activity {
                                     }
                                 } else {
                                     if (imgUrl.equals(npArtwork.getTag())) {
-                                        showErrorState("Failed to download");
+                                        showErrorState("Download failed");
                                     }
                                 }
                             }
                         }.execute();
                     } else {
-                        showErrorState("Failed to download");
+                        showErrorState("cannot get url");
                     }
-                } catch (Exception e) { showErrorState("Failed to download"); }
+                } catch (Exception e) { showErrorState("cannot get url"); }
             }
-            @Override public void onError(String error) { endTask(2000); showErrorState("Failed to download"); }
+            @Override public void onError(String error) { endTask(2000); showErrorState("cannot get url"); }
             
             private void loadHighResIfNeeded(final String highResUrl, final String currentImgUrl) {
                 if (highResUrl != null && !highResUrl.isEmpty() && !highResUrl.equals(currentImgUrl)) {
@@ -3117,8 +3211,7 @@ public class MainActivity extends Activity {
                     }
                     new AsyncTask<Void, Void, Bitmap>() {
                         @Override protected Bitmap doInBackground(Void... voids) {
-                            byte[] data = downloadUrlToBytes(highResUrl);
-                            return decodeSampledBitmapFromBytes(data, 500, 500, pixelPerfect);
+                            return downloadAndDecodeBitmap(highResUrl, 500, 500, pixelPerfect);
                         }
                         @Override protected void onPostExecute(Bitmap hb) {
                             if (hb != null) {
@@ -3136,7 +3229,7 @@ public class MainActivity extends Activity {
                 if (npArtProgress != null) npArtProgress.setVisibility(View.GONE);
                 npArtwork.setImageResource(R.drawable.ic_error);
                 if (npArtErrorLayout != null) npArtErrorLayout.setVisibility(View.VISIBLE);
-                if (npArtErrorText != null) npArtErrorText.setText("cannot get url");
+                if (npArtErrorText != null) npArtErrorText.setText(errorMsg);
                 if (npArtRetryBtn != null) {
                     npArtRetryBtn.setOnClickListener(new View.OnClickListener() {
                         @Override public void onClick(View v) {

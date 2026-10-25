@@ -147,13 +147,13 @@ class SpotifyControl:
 
     @staticmethod
     def next_track() -> None:
-        SpotifyControl._last_title = ""
         SpotifyControl._run_cli(["next"])
+        time.sleep(0.25)
 
     @staticmethod
     def prev_track() -> None:
-        SpotifyControl._last_title = ""
         SpotifyControl._run_cli(["previous"])
+        time.sleep(0.25)
 
     @staticmethod
     def seek(ms: str, relative: bool = True) -> None:
@@ -410,6 +410,21 @@ class SpotifyControl:
 
                 # Song has changed or boundary check: Enrich with CLI for URI, Artwork, Context, and Ad state
                 cli_output = SpotifyControl._run_cli(["now-playing", "--format", "json"])
+                if force_fetch and cli_output and SpotifyControl._last_uri:
+                    try:
+                        first_json = json.loads(cli_output)
+                        first_uri = (
+                            first_json.get("currently_playing", {}).get("uri", "")
+                            or first_json.get("track", {}).get("uri", "")
+                        )
+                        if first_uri and first_uri == SpotifyControl._last_uri:
+                            time.sleep(0.25)
+                            retry_out = SpotifyControl._run_cli(["now-playing", "--format", "json"])
+                            if retry_out:
+                                cli_output = retry_out
+                    except Exception:
+                        pass
+
                 uri = ""
                 context_desc = ""
                 is_ad = title.lower() == "advertisement" or artist.lower() == "advertisement"
@@ -441,7 +456,8 @@ class SpotifyControl:
                             title = "Advertisement"
                             artist = "Advertisement"
                             album = ""
-                        elif cli_title and (not title or (uri and uri != SpotifyControl._last_uri and title == SpotifyControl._last_title)):
+                        elif cli_title and (not title or force_fetch or (uri and uri != SpotifyControl._last_uri) or cli_title != title):
+                            # Prefer live CLI track title/artist when SMTC is still lagging on the previous track
                             title = cli_title
                             if cli_artist:
                                 artist = cli_artist
@@ -470,18 +486,20 @@ class SpotifyControl:
                     except Exception:
                         pass
 
-                if title != SpotifyControl._last_title or artist != SpotifyControl._last_artist or is_ad:
-                    if not uri or uri == SpotifyControl._last_uri:
+                uri_changed = bool(uri and uri != SpotifyControl._last_uri)
+                if title != SpotifyControl._last_title or artist != SpotifyControl._last_artist or uri_changed or is_ad:
+                    if not uri:
                         SpotifyControl._last_uri = ""
                     SpotifyControl._last_artwork_url = ""
-                    SpotifyControl._last_album = album if not is_ad else ""
+                    # Clear stale SMTC album when URI changed so lookup's album takes precedence
+                    SpotifyControl._last_album = "" if (uri_changed or is_ad) else album
 
                 SpotifyControl._last_title = title
                 SpotifyControl._last_artist = artist
-                if album and not is_ad:
+                if album and not is_ad and not uri_changed:
                     SpotifyControl._last_album = album
 
-                # Artwork resolution
+                # Artwork & Album resolution via CLI lookup when URI changes
                 if is_ad:
                     SpotifyControl._last_uri = uri
                     SpotifyControl._last_artwork_url = ""
@@ -492,10 +510,20 @@ class SpotifyControl:
                         entities = json.loads(lookup_out).get("entities", [])
                         ent = entities[0] if entities else {}
                         SpotifyControl._last_artwork_url = ent.get("image_url", "")
-                        if not SpotifyControl._last_album and ent.get("parent", {}).get("name"):
-                            SpotifyControl._last_album = ent.get("parent", {}).get("name", "")
+                        lookup_album = ent.get("parent", {}).get("name", "")
+                        if lookup_album:
+                            SpotifyControl._last_album = lookup_album
+                            album = lookup_album
+                        elif album:
+                            SpotifyControl._last_album = album
+                        lookup_title = (ent.get("name") or "").strip()
+                        if lookup_title:
+                            title = lookup_title
+                            SpotifyControl._last_title = lookup_title
                     except Exception:
                         SpotifyControl._last_artwork_url = SpotifyControl.get_artwork(uri)
+                        if album:
+                            SpotifyControl._last_album = album
                 elif not uri and not SpotifyControl._last_uri:
                     SpotifyControl._last_artwork_url = ""
 

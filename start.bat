@@ -5,7 +5,7 @@ if defined VIRTUAL_ENV (
 ) else (
     echo No virtual environment is currently active.
 )
-echo Checking for updates...
+echo Launching updater...
 if exist "installer_and_updater.py" (
     python installer_and_updater.py --update-check --relaunch "start.bat"
 ) else if exist "updater\installer_and_updater.py" (

@@ -506,6 +506,53 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                     self._json_response(400, {"error": "Unknown system command"})
             except Exception as e:
                 self._json_response(500, {"error": str(e)})
+        # API: Direct image bytes proxy fallback for Android 2.3
+        if path.startswith("/api/image_download"):
+            try:
+                from urllib.parse import urlparse, parse_qs
+                import urllib.request
+                import ssl
+                img_url = parse_qs(urlparse(self.path).query).get("url", [""])[0]
+                if not img_url:
+                    self.send_error(400, "Missing url")
+                    return
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(
+                    img_url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0",
+                        "Accept": "image/jpeg,image/png,image/*,*/*;q=0.8",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+                    raw_bytes = resp.read()
+                    content_type = resp.headers.get("Content-Type", "image/jpeg")
+                # Ensure format is standard JPEG/PNG for Android 2.3 BitmapFactory
+                try:
+                    from PySide6.QtGui import QImage
+                    from PySide6.QtCore import QByteArray, QBuffer, QIODevice
+                    qimg = QImage.fromData(raw_bytes)
+                    if not qimg.isNull():
+                        ba = QByteArray()
+                        buf = QBuffer(ba)
+                        buf.open(QIODevice.WriteOnly)
+                        qimg.save(buf, "JPG", 90)
+                        raw_bytes = bytes(ba)
+                        content_type = "image/jpeg"
+                except Exception:
+                    pass
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(raw_bytes)))
+                self.send_header("Cache-Control", "max-age=3600")
+                self.end_headers()
+                self.wfile.write(raw_bytes)
+            except Exception as e:
+                self.send_error(500, str(e))
+            return
+
         # API: Proxy artwork for Android 2.3
         if path.startswith("/api/proxy_art"):
             try:
@@ -520,19 +567,33 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                             data = json_mod.loads(res)
                             entities = data.get("entities", [])
                             if entities:
-                                img_url = entities[0].get("image_url", "")
+                                img_url = (entities[0].get("image_url") or "").strip()
+                                if img_url.startswith("spotify:image:"):
+                                    img_url = "http://i.scdn.co/image/" + img_url.split("spotify:image:", 1)[1]
+                                elif img_url.startswith("spotify:mosaic:"):
+                                    parts = img_url.split(":")[2:]
+                                    if parts:
+                                        img_url = "http://mosaic.scdn.co/300/" + "".join(parts)
                                 if img_url:
-                                    img_url = img_url.replace("https://", "http://")
-                                    # 1e02 is 300x300 (Search size), b273 is 640x640 (High Quality), 4851 is 64x64 (Low Quality)
-                                    low_res = img_url.replace("b273", "4851").replace("1e02", "4851")
-                                    high_res = img_url.replace("4851", "b273").replace("1e02", "b273")
+                                    if "i.scdn.co" in img_url:
+                                        img_url = img_url.replace("https://", "http://")
+                                        # 1e02 is 300x300 (Search size), b273 is 640x640 (High Quality), 4851 is 64x64 (Low Quality)
+                                        low_res = img_url.replace("b273", "4851").replace("1e02", "4851")
+                                        high_res = img_url.replace("4851", "b273").replace("1e02", "b273")
+                                    else:
+                                        low_res = img_url
+                                        high_res = img_url
                                     self._json_response(200, {"thumbnail_url": low_res, "high_res_url": high_res})
+                                    return
+                                else:
+                                    # Lookup succeeded, but Spotify provided no image URL for this item (e.g. custom playlist with no cover)
+                                    self._json_response(200, {"thumbnail_url": "", "high_res_url": "", "no_url": True})
                                     return
                         except Exception:
                             pass
                     
-                    # Fallback if lookup fails
-                    self._json_response(400, {"error": "Could not resolve artwork"})
+                    # Fallback if lookup fails or returns no image
+                    self._json_response(200, {"thumbnail_url": "", "high_res_url": "", "no_url": True})
                 else:
                     self._json_response(400, {"error": "Missing URI"})
             except Exception as e:
