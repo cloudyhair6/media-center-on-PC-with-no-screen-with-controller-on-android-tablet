@@ -134,26 +134,92 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 from urllib.parse import urlparse, parse_qs
                 import urllib.request
                 import urllib.error
+                import re
                 qs = parse_qs(urlparse(self.path).query)
-                track = qs.get("track", [""])[0]
-                artist = qs.get("artist", [""])[0]
+                track = qs.get("track", [""])[0].strip()
+                artist = qs.get("artist", [""])[0].strip()
                 source = qs.get("source", [""])[0].strip()
-                if source:
-                    url = f"http://127.0.0.1:9999/lyrics/?song={urllib.parse.quote(track)}&artist={urllib.parse.quote(artist)}&timestamps=true&pass=true&sequence={urllib.parse.quote(source)}"
-                else:
-                    url = f"http://127.0.0.1:9999/lyrics/?song={urllib.parse.quote(track)}&artist={urllib.parse.quote(artist)}&timestamps=true"
-                req = urllib.request.Request(url)
-                with urllib.request.urlopen(req, timeout=12) as response:
-                    data = json.loads(response.read().decode('utf-8'))
-                    self._json_response(200, data)
-            except urllib.error.HTTPError as e:
+
+                def _clean_track_title(t: str) -> str:
+                    if not t:
+                        return ""
+                    c = re.sub(
+                        r'\s*[\(\[](?:feat|ft|featuring|with|remaster|remastered|\d{4}\s+remaster|version|deluxe|mono|stereo|live|edit|radio\s+edit|bonus|anniversary|expanded|\d{4}\s+mix|mix|remix|club\s+mix|from\s+.*?soundtrack|soundtrack|ost).*?[\)\]]',
+                        '',
+                        t,
+                        flags=re.IGNORECASE
+                    )
+                    c = re.sub(
+                        r'\s*-\s*(?:remaster.*|\d{4}\s+remaster.*|live.*|radio\s+edit.*|deluxe.*|bonus\s+track.*|version.*|original\s+mix.*|mono.*|stereo.*|single\s+version.*|from\s+.*?soundtrack.*|\d{4}\s+mix.*)$',
+                        '',
+                        c,
+                        flags=re.IGNORECASE
+                    )
+                    c = re.sub(r'\s*[\(\[]\s*[\)\]]', '', c)
+                    return c.strip()
+
+                def _clean_artist(a: str) -> str:
+                    if not a:
+                        return ""
+                    parts = re.split(r'\s*(?:,|;|/|feat\.?|ft\.?|featuring)\s*', a, flags=re.IGNORECASE)
+                    return parts[0].strip() if parts else a.strip()
+
+                def _query_lyrica(t: str, a: str, s: str):
+                    base_url = "http://127.0.0.1:9999/lyrics/"
+                    params = [
+                        f"song={urllib.parse.quote(t)}",
+                        f"artist={urllib.parse.quote(a)}",
+                        "timestamps=true"
+                    ]
+                    if s:
+                        params.extend(["pass=true", f"sequence={urllib.parse.quote(s)}"])
+                    url = f"{base_url}?{'&'.join(params)}"
+                    req = urllib.request.Request(url)
+                    with urllib.request.urlopen(req, timeout=12) as response:
+                        return json.loads(response.read().decode('utf-8'))
+
+                data = None
                 try:
-                    data = json.loads(e.read().decode('utf-8'))
-                    self._json_response(200, data)
+                    data = _query_lyrica(track, artist, source)
+                except urllib.error.HTTPError as he:
+                    try:
+                        data = json.loads(he.read().decode('utf-8'))
+                    except Exception:
+                        data = None
                 except Exception:
+                    data = None
+
+                is_success = isinstance(data, dict) and data.get("status") == "success"
+
+                if not is_success:
+                    clean_t = _clean_track_title(track)
+                    clean_a = _clean_artist(artist)
+                    fallbacks = []
+                    if clean_t and clean_t != track:
+                        fallbacks.append((clean_t, artist))
+                    if clean_a and clean_a != artist:
+                        fallbacks.append((track, clean_a))
+                    if clean_t and clean_a and (clean_t != track or clean_a != artist):
+                        fallbacks.append((clean_t, clean_a))
+
+                    for fb_t, fb_a in fallbacks:
+                        try:
+                            fb_data = _query_lyrica(fb_t, fb_a, source)
+                            if isinstance(fb_data, dict) and fb_data.get("status") == "success":
+                                data = fb_data
+                                is_success = True
+                                break
+                        except Exception:
+                            continue
+
+                if is_success and data:
+                    self._json_response(200, data)
+                elif isinstance(data, dict):
+                    self._json_response(200, data)
+                else:
                     self._json_response(200, {"status": "error", "error": {"message": "Lyrics not found"}, "message": "Lyrics not found"})
-            except Exception:
-                self._json_response(200, {"status": "error", "error": {"message": "Lyrics not found"}, "message": "Lyrics not found"})
+            except Exception as e:
+                self._json_response(200, {"status": "error", "error": {"message": str(e)}, "message": str(e)})
             return
 
         # API: Spotify search

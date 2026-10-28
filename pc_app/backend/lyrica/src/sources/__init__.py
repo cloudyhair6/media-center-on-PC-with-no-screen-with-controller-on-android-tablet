@@ -46,9 +46,9 @@ _try_import("simpmusic",  "src.sources.simp_music_fetcher",  "SimpMusicFetcher")
 _try_import("netease",    "src.sources.netease_fetcher",     "NetEaseFetcher")
 _try_import("megalobiz",  "src.sources.megalobiz_fetcher",   "MegalobizFetcher")
 _try_import("musixmatch", "src.sources.musixmatch_fetcher",  "MusixmatchFetcher")
+_try_import("lyricsovh",   "src.sources.lyricsovh_fetcher",   "LyricsOvhFetcher")
 
 # ── Disabled fetchers (dead APIs — do NOT load into ALL_FETCHERS) ────────────
-# _try_import("lyricsovh",   "src.sources.lyricsovh_fetcher",   "LyricsOvhFetcher")   # dead
 # _try_import("chartlyrics", "src.sources.chartlyrics_fetcher", "ChartLyricsFetcher") # dead
 # _try_import("lyricsfreek", "src.sources.lyricsfreek_fetcher", "LyricsFreekFetcher") # DNS dead
 

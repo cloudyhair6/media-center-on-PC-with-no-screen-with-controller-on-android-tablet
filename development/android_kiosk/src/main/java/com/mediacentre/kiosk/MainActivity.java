@@ -787,7 +787,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        // First connect to PC and update current song info, then fetchLyrics will step through 1/6..6/6
+        // First connect to PC and update current song info, then fetchLyrics will step through 1/8..8/8
         final int checkLoadId = startLoading("Loading song info...");
         api.get("/api/spotify/now_playing?force=true", new ApiClient.Callback() {
             @Override
@@ -3303,7 +3303,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void showLyricsNotFound() {
+    private void showLyricsNotFound(final String track, final String artist) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -3314,8 +3314,30 @@ public class MainActivity extends Activity {
                     error.setTextColor(0xFF8892b0);
                     error.setTextSize(18);
                     error.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                    error.setPadding(0, 40, 0, 0);
+                    error.setPadding(0, 40, 0, 20);
                     lyricsContent.addView(error);
+
+                    Button retryBtn = new Button(MainActivity.this);
+                    retryBtn.setText("Retry");
+                    styleDynamicButton(retryBtn);
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    );
+                    lp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+                    retryBtn.setLayoutParams(lp);
+                    retryBtn.setPadding(35, 15, 35, 15);
+                    retryBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            currentLyricsTrack = "";
+                            currentLyricsArtist = "";
+                            String curTitle = npTitle != null ? npTitle.getText().toString() : track;
+                            String curArtist = npArtist != null ? npArtist.getText().toString() : artist;
+                            fetchLyrics(curTitle, curArtist);
+                        }
+                    });
+                    lyricsContent.addView(retryBtn);
                 }
             }
         });
@@ -3349,8 +3371,8 @@ public class MainActivity extends Activity {
         currentLyrics.clear();
         currentLyricLineIndex = -1;
 
-        final int[] sourceIds = new int[]{2, 3, 4, 5, 6, 7};
-        final String[] sourceNames = new String[]{"LRCLIB", "YouTube", "NetEase", "Megalobiz", "Musixmatch", "SimpMusic"};
+        final int[] sourceIds = new int[]{2, 3, 4, 5, 6, 7, 1, 8};
+        final String[] sourceNames = new String[]{"LRCLIB", "YouTube", "NetEase", "Megalobiz", "Musixmatch", "SimpMusic", "Genius", "Lyrics.ovh"};
 
         final TextView loadingTv = new TextView(MainActivity.this);
         loadingTv.setText("Searching for lyrics on " + sourceNames[0] + " 1/" + sourceNames.length + "...");
@@ -3478,7 +3500,7 @@ public class MainActivity extends Activity {
                     currentLyricsArtist = artist;
                     if (currentLyricsLoadId == loadId) currentLyricsLoadId = -1;
                     stopLoading(loadId);
-                    showLyricsNotFound();
+                    showLyricsNotFound(track, artist);
                 }
             }
         });

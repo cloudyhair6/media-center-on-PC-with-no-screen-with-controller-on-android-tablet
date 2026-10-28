@@ -28,12 +28,13 @@ FETCHER_MAP = {
     5: "Megalobiz",
     6: "Musixmatch",
     7: "SimpMusic",
+    8: "Lyrics.ovh",
 }
 
 # Synced-lyrics sequence: sources that natively return LRC timestamps
 DEFAULT_SYNCED_SEQUENCE = [2, 3, 4, 5, 6, 7]   # LRCLIB, YouTube, NetEase, Megalobiz, Musixmatch, SimpMusic
 # Plain-lyrics sequence: all active sources, Genius first for quality
-DEFAULT_PLAIN_SEQUENCE  = [1, 2, 3, 4, 5, 6, 7]
+DEFAULT_PLAIN_SEQUENCE  = [1, 2, 3, 4, 5, 6, 7, 8]
 # Fast (parallel) mode: best two reliable synced sources
 FAST_MODE_SEQUENCE      = [2, 3]   # LRCLIB + YouTube
 
@@ -47,6 +48,7 @@ def _registry() -> dict:
         5: ("Megalobiz",     ALL_FETCHERS.get("megalobiz")),
         6: ("Musixmatch",    ALL_FETCHERS.get("musixmatch")),
         7: ("SimpMusic",     ALL_FETCHERS.get("simpmusic")),
+        8: ("Lyrics.ovh",    ALL_FETCHERS.get("lyricsovh")),
     }
 
 
