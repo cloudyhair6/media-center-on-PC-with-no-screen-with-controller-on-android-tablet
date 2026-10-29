@@ -301,9 +301,14 @@ class LocalMusicManager:
                 missing_fields.append("Artwork")
 
             if is_inc or missing_fields:
-                s_copy = dict(s)
-                s_copy["missing_fields_list"] = missing_fields
-                incomplete.append(s_copy)
+                incomplete.append({
+                    "file_path": s.get("file_path", ""),
+                    "file_name": s.get("file_name", ""),
+                    "title": title or s.get("file_name", "Untitled"),
+                    "artist": artist or "Unknown Artist",
+                    "album": album or "",
+                    "missing_fields_list": missing_fields,
+                })
         return incomplete
 
     def get_unindexed_files(self) -> List[Dict[str, Any]]:

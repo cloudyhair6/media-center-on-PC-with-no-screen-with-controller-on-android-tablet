@@ -684,15 +684,43 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                                 continue
                             filtered.append(s)
                         songs = filtered
-                    self._json_response(200, {"songs": songs, "total": len(songs)})
+
+                    total_songs = len(songs)
+                    limit_str = parsed.get("limit", ["100"])[0]
+                    offset_str = parsed.get("offset", ["0"])[0]
+                    try:
+                        limit = max(1, min(int(limit_str), 300))
+                    except Exception:
+                        limit = 100
+                    try:
+                        offset = max(0, int(offset_str))
+                    except Exception:
+                        offset = 0
+
+                    paged = songs[offset:offset + limit]
+                    projected = []
+                    for s in paged:
+                        projected.append({
+                            "file_path": s.get("file_path", ""),
+                            "file_name": s.get("file_name", ""),
+                            "title": s.get("title") or s.get("file_name", "Untitled"),
+                            "artist": s.get("contributing_artists") or s.get("artist") or "Unknown Artist",
+                            "album": s.get("album") or "",
+                            "duration_formatted": s.get("duration_formatted") or "",
+                            "format": s.get("format") or "",
+                            "bitrate_kbps": s.get("bitrate_kbps") or "",
+                        })
+                    self._json_response(200, {"songs": projected, "total": total_songs, "limit": limit, "offset": offset})
                 elif action == "artists":
                     self._json_response(200, {"artists": mgr.get_artists()})
                 elif action == "albums":
                     self._json_response(200, {"albums": mgr.get_albums()})
                 elif action == "incomplete":
-                    self._json_response(200, {"incomplete": mgr.get_incomplete_songs()})
+                    inc = mgr.get_incomplete_songs()
+                    self._json_response(200, {"incomplete": inc[:150], "total": len(inc)})
                 elif action == "unindexed":
-                    self._json_response(200, {"unindexed": mgr.get_unindexed_files()})
+                    un = mgr.get_unindexed_files()
+                    self._json_response(200, {"unindexed": un[:150], "total": len(un)})
                 elif action == "scan":
                     folders = parsed.get("folders", [])
                     if not folders:

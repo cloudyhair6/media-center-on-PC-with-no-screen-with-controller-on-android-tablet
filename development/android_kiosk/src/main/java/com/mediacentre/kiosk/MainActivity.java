@@ -3928,7 +3928,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        isLocalIndexingPolling = false;
+        isLocalFpPolling = false;
         handler.removeCallbacksAndMessages(null);
+        handler.removeCallbacks(pollLocalIndexingRunnable);
+        handler.removeCallbacks(pollLocalFpRunnable);
         if (bitmapCache != null) {
             bitmapCache.clear();
         }
@@ -3956,6 +3960,7 @@ public class MainActivity extends Activity {
                         try {
                             JSONObject json = new JSONObject(response);
                             boolean isScanning = json.optBoolean("is_scanning", false);
+                            boolean isFingerprinting = json.optBoolean("is_fingerprinting", false);
                             boolean hasFolders = json.optBoolean("has_configured_folders", false);
                             int incCount = json.optInt("incomplete_count", 0);
                             JSONObject player = json.optJSONObject("player_status");
@@ -3964,6 +3969,10 @@ public class MainActivity extends Activity {
                             if (isScanning) {
                                 showLocalScreen(2);
                                 startLocalIndexingPoll();
+                            } else if (isFingerprinting) {
+                                showLocalScreen(3);
+                                switchReviewTab(currentReviewTab);
+                                startFingerprintActionPoll("VLC Fingerprint");
                             } else if (!hasFolders) {
                                 showLocalScreen(1);
                                 loadLocalFolderBrowser("");
@@ -4528,8 +4537,62 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean isLocalFpPolling = false;
+    private String currentFpActionLabel = "Fingerprinting";
+    private final Runnable pollLocalFpRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (api == null) return;
+            api.get("/api/indexer/status", new ApiClient.Callback() {
+                @Override
+                public void onSuccess(final String response) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                JSONObject json = new JSONObject(response);
+                                boolean isFp = json.optBoolean("is_fingerprinting", false);
+                                JSONObject prog = json.optJSONObject("fingerprint_progress");
+                                int pct = prog != null ? prog.optInt("progress_percent", 0) : 0;
+                                int enriched = prog != null ? prog.optInt("enriched_count", 0) : 0;
+
+                                if (localFpProgressBar != null) {
+                                    localFpProgressBar.setVisibility(isFp ? View.VISIBLE : View.GONE);
+                                    localFpProgressBar.setProgress(pct);
+                                }
+                                if (localFpStatus != null) {
+                                    localFpStatus.setVisibility(View.VISIBLE);
+                                    localFpStatus.setText(currentFpActionLabel + ": " + pct + "% (" + enriched + " tracks enriched)");
+                                }
+
+                                if (isFp) {
+                                    if (isLocalFpPolling) {
+                                        handler.postDelayed(pollLocalFpRunnable, 1200);
+                                    }
+                                } else {
+                                    isLocalFpPolling = false;
+                                    if (localFpProgressBar != null) localFpProgressBar.setVisibility(View.GONE);
+                                    if (localFpStatus != null) localFpStatus.setText("Completed " + currentFpActionLabel + "!");
+                                    showToast(currentFpActionLabel + " finished!", true);
+                                    loadIncompleteSongs();
+                                }
+                            } catch (Exception e) {}
+                        }
+                    });
+                }
+                @Override
+                public void onError(String error) {
+                    if (isLocalFpPolling) {
+                        handler.postDelayed(pollLocalFpRunnable, 2500);
+                    }
+                }
+            });
+        }
+    };
+
     private void runFingerprintAction(final String endpoint, final String label) {
         if (api == null) return;
+        currentFpActionLabel = label;
         if (localFpProgressBar != null) {
             localFpProgressBar.setVisibility(View.VISIBLE);
             localFpProgressBar.setProgress(0);
@@ -4554,47 +4617,12 @@ public class MainActivity extends Activity {
     }
 
     private void startFingerprintActionPoll(final String label) {
-        handler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (api == null) return;
-                api.get("/api/indexer/status", new ApiClient.Callback() {
-                    @Override
-                    public void onSuccess(final String response) {
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                try {
-                                    JSONObject json = new JSONObject(response);
-                                    boolean isFp = json.optBoolean("is_fingerprinting", false);
-                                    JSONObject prog = json.optJSONObject("fingerprint_progress");
-                                    int pct = prog != null ? prog.optInt("progress_percent", 0) : 0;
-                                    int enriched = prog != null ? prog.optInt("enriched_count", 0) : 0;
-
-                                    if (localFpProgressBar != null) localFpProgressBar.setProgress(pct);
-                                    if (localFpStatus != null) {
-                                        localFpStatus.setText(label + ": " + pct + "% (" + enriched + " tracks enriched)");
-                                    }
-
-                                    if (isFp) {
-                                        handler.postDelayed(new Runnable() {
-                                            @Override public void run() { startFingerprintActionPoll(label); }
-                                        }, 1200);
-                                    } else {
-                                        if (localFpProgressBar != null) localFpProgressBar.setVisibility(View.GONE);
-                                        if (localFpStatus != null) localFpStatus.setText("Completed " + label + "!");
-                                        showToast(label + " finished!", true);
-                                        loadIncompleteSongs();
-                                    }
-                                } catch (Exception e) {}
-                            }
-                        });
-                    }
-                    @Override
-                    public void onError(String error) {}
-                });
-            }
-        });
+        if (label != null && !label.isEmpty()) {
+            currentFpActionLabel = label;
+        }
+        isLocalFpPolling = true;
+        handler.removeCallbacks(pollLocalFpRunnable);
+        handler.post(pollLocalFpRunnable);
     }
 
     private void switchLocalLibrarySubTab(int index) {

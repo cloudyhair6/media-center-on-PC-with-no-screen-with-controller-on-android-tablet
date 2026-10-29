@@ -44,7 +44,13 @@ public class ApiClient {
                     reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
                     StringBuilder sb = new StringBuilder();
                     String line;
+                    int totalChars = 0;
+                    final int MAX_SAFE_CHARS = 2 * 1024 * 1024; // 2MB safety ceiling for Android 2.3 Dalvik heap
                     while ((line = reader.readLine()) != null) {
+                        totalChars += line.length();
+                        if (totalChars > MAX_SAFE_CHARS) {
+                            return new String[]{"error", "Response too large (>2MB)"};
+                        }
                         sb.append(line);
                     }
                     
@@ -54,7 +60,10 @@ public class ApiClient {
                     } else {
                         return new String[]{"error", body.isEmpty() ? "HTTP error " + code : body};
                     }
-                } catch (Exception e) {
+                } catch (OutOfMemoryError oom) {
+                    System.gc();
+                    return new String[]{"error", "Device low on memory: response too large"};
+                } catch (Throwable e) {
                     String msg = e.getMessage();
                     if (msg == null || msg.trim().isEmpty()) {
                         msg = "Network error: " + e.getClass().getSimpleName();
@@ -87,4 +96,3 @@ public class ApiClient {
         }.execute();
     }
 }
-
