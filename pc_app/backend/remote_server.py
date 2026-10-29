@@ -691,6 +691,8 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                     self._json_response(200, {"albums": mgr.get_albums()})
                 elif action == "incomplete":
                     self._json_response(200, {"incomplete": mgr.get_incomplete_songs()})
+                elif action == "unindexed":
+                    self._json_response(200, {"unindexed": mgr.get_unindexed_files()})
                 elif action == "scan":
                     folders = parsed.get("folders", [])
                     if not folders:

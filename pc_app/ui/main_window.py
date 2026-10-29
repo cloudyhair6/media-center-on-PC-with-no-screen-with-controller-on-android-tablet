@@ -87,8 +87,10 @@ class MainWindow(QMainWindow):
         
         self._index_status_label = QLabel("Indexing Local Music... 0%")
         self._index_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._index_status_label.setWordWrap(True)
+        self._index_status_label.setFixedWidth(520)
         self._index_status_label.setStyleSheet(
-            f'color: {Colors.ACCENT}; font-size: 14px; font-weight: bold; background: transparent;'
+            f'color: {Colors.ACCENT}; font-size: 13px; font-weight: bold; background: transparent;'
         )
         index_layout.addWidget(self._index_status_label)
         
@@ -161,6 +163,12 @@ class MainWindow(QMainWindow):
         self._clock_timer.setInterval(1000)
         self._clock_timer.timeout.connect(self._update_clock)
         self._clock_timer.start()
+
+        # High-speed Indexing Progress Timer (fast 30ms during scanning, 300ms idle)
+        self._indexing_timer = QTimer(self)
+        self._indexing_timer.setInterval(300)
+        self._indexing_timer.timeout.connect(self._check_indexing_status)
+        self._indexing_timer.start()
         
         # Config file watcher
         from PySide6.QtCore import QFileSystemWatcher
@@ -222,35 +230,66 @@ class MainWindow(QMainWindow):
         now = datetime.now()
         self._clock.setText(now.strftime('%H:%M'))
         self._date.setText(now.strftime('%A, %B %d, %Y'))
-        self._check_indexing_status()
 
     def _check_indexing_status(self):
         try:
             from backend.local_music import LocalMusicManager
             mgr = LocalMusicManager.get_instance()
-            stats = mgr.get_catalog_stats()
-            if stats.get("is_scanning", False):
-                prog = stats.get("scan_progress", {})
+            state = mgr.get_indexing_ui_state()
+
+            if state.get("is_scanning", False):
+                if self._indexing_timer.interval() != 30:
+                    self._indexing_timer.setInterval(30)
+                prog = state.get("scan_progress", {})
                 pct = prog.get("progress_percent", 0)
                 curr = prog.get("current_file", "")
-                label_txt = f"Indexing Local Music... {pct}%"
+                songs = prog.get("songs_indexed", 0)
+                idx = prog.get("current_file_index", 0)
+                total = prog.get("total_files", 0)
+
+                if total > 0:
+                    label_txt = f"Indexing Local Music: {songs} songs ({idx}/{total}) • {pct}%"
+                else:
+                    label_txt = f"Indexing Local Music... {pct}%"
                 if curr:
-                    label_txt += f" ({curr})"
+                    if len(curr) > 45:
+                        curr = curr[:42] + "..."
+                    label_txt += f"\n{curr}"
+
                 self._index_status_label.setText(label_txt)
                 self._index_progress_bar.setValue(pct)
-                self._index_container.setVisible(True)
-            elif stats.get("is_fingerprinting", False):
-                prog = stats.get("fingerprint_progress", {})
+                if not self._index_container.isVisible():
+                    self._index_container.setVisible(True)
+
+            elif state.get("is_fingerprinting", False):
+                if self._indexing_timer.interval() != 30:
+                    self._indexing_timer.setInterval(30)
+                prog = state.get("fingerprint_progress", {})
                 pct = prog.get("progress_percent", 0)
                 curr = prog.get("current_file", "")
-                label_txt = f"Fingerprinting... {pct}%"
+                enriched = prog.get("enriched_count", 0)
+                idx = prog.get("current_file_index", 0)
+                total = prog.get("total_files", 0)
+
+                if total > 0:
+                    label_txt = f"Fingerprinting: {enriched} enriched ({idx}/{total}) • {pct}%"
+                else:
+                    label_txt = f"Fingerprinting... {pct}%"
                 if curr:
-                    label_txt += f" ({curr})"
+                    if len(curr) > 45:
+                        curr = curr[:42] + "..."
+                    label_txt += f"\n{curr}"
+
                 self._index_status_label.setText(label_txt)
                 self._index_progress_bar.setValue(pct)
-                self._index_container.setVisible(True)
+                if not self._index_container.isVisible():
+                    self._index_container.setVisible(True)
+
             else:
-                self._index_container.setVisible(False)
+                if self._indexing_timer.interval() != 300:
+                    self._indexing_timer.setInterval(300)
+                if self._index_container.isVisible():
+                    self._index_container.setVisible(False)
         except Exception:
             pass
     

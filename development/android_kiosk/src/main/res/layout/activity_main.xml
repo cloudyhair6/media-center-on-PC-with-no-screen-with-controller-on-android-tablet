@@ -504,14 +504,37 @@
                     android:orientation="vertical"
                     android:padding="12dp"
                     android:visibility="gone">
-                    <TextView
+                    <TextView android:id="@+id/local_fp_title"
                         android:layout_width="fill_parent"
                         android:layout_height="wrap_content"
-                        android:text="Songs Needing Metadata / Fingerprinting"
+                        android:text="Post-Scan Review"
                         android:textColor="#ffffff"
                         android:textSize="20sp"
                         android:textStyle="bold"
                         android:layout_marginBottom="4dp" />
+                    <LinearLayout
+                        android:layout_width="fill_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:background="#111827"
+                        android:layout_marginBottom="8dp">
+                        <Button android:id="@+id/btn_local_review_incomplete"
+                            android:layout_width="0dp"
+                            android:layout_height="38dp"
+                            android:layout_weight="1"
+                            android:text="Incomplete Songs"
+                            android:textColor="#00d4ff"
+                            android:background="#1a1f36"
+                            android:textSize="13sp" />
+                        <Button android:id="@+id/btn_local_review_unindexed"
+                            android:layout_width="0dp"
+                            android:layout_height="38dp"
+                            android:layout_weight="1"
+                            android:text="Unindexed Files"
+                            android:textColor="#8892b0"
+                            android:background="#111827"
+                            android:textSize="13sp" />
+                    </LinearLayout>
                     <TextView android:id="@+id/local_fp_subtitle"
                         android:layout_width="fill_parent"
                         android:layout_height="wrap_content"
@@ -519,7 +542,7 @@
                         android:textColor="#8892b0"
                         android:textSize="13sp"
                         android:layout_marginBottom="10dp" />
-                    <LinearLayout
+                    <LinearLayout android:id="@+id/local_fp_actions_container"
                         android:layout_width="fill_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
@@ -637,6 +660,14 @@
                             android:background="@drawable/btn_dark"
                             android:paddingLeft="10dp" android:paddingRight="10dp"
                             android:layout_marginLeft="4dp" />
+                        <Button android:id="@+id/btn_local_review_manage"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:text="Review"
+                            android:textColor="#ffa726"
+                            android:background="@drawable/btn_dark"
+                            android:paddingLeft="10dp" android:paddingRight="10dp"
+                            android:layout_marginLeft="4dp" />
                     </LinearLayout>
                     <LinearLayout
                         android:layout_width="fill_parent"
@@ -654,6 +685,10 @@
                         <Button android:id="@+id/btn_local_sub_albums"
                             android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1"
                             android:text="Albums" android:textColor="#8892b0" android:background="#111827"
+                            android:textSize="13sp" />
+                        <Button android:id="@+id/btn_local_sub_unindexed"
+                            android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1"
+                            android:text="Unindexed" android:textColor="#8892b0" android:background="#111827"
                             android:textSize="13sp" />
                     </LinearLayout>
                     <ScrollView

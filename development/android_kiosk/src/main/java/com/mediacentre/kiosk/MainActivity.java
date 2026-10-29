@@ -99,6 +99,12 @@ public class MainActivity extends Activity {
     private Button btnLocalIdxBackground;
     private boolean isLocalIndexingPolling = false;
 
+    private TextView localFpTitle;
+    private TextView localFpSubtitle;
+    private Button btnLocalReviewIncomplete;
+    private Button btnLocalReviewUnindexed;
+    private LinearLayout localFpActionsContainer;
+    private int currentReviewTab = 0;
     private Button btnLocalFpVlc;
     private Button btnLocalFpArt;
     private Button btnLocalFpWrite;
@@ -111,9 +117,11 @@ public class MainActivity extends Activity {
     private Button btnLocalSearchClear;
     private Button btnLocalRescan;
     private Button btnLocalFoldersManage;
+    private Button btnLocalReviewManage;
     private Button btnLocalSubSongs;
     private Button btnLocalSubArtists;
     private Button btnLocalSubAlbums;
+    private Button btnLocalSubUnindexed;
     private LinearLayout localLibraryItemsContainer;
     private int currentLocalSubTab = 0;
     private String currentLocalFilterArtist = null;
@@ -1432,6 +1440,23 @@ public class MainActivity extends Activity {
                 });
             }
 
+            localFpTitle = (TextView) findViewById(R.id.local_fp_title);
+            localFpSubtitle = (TextView) findViewById(R.id.local_fp_subtitle);
+            btnLocalReviewIncomplete = (Button) findViewById(R.id.btn_local_review_incomplete);
+            btnLocalReviewUnindexed = (Button) findViewById(R.id.btn_local_review_unindexed);
+            localFpActionsContainer = (LinearLayout) findViewById(R.id.local_fp_actions_container);
+
+            if (btnLocalReviewIncomplete != null) {
+                btnLocalReviewIncomplete.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { switchReviewTab(0); }
+                });
+            }
+            if (btnLocalReviewUnindexed != null) {
+                btnLocalReviewUnindexed.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { switchReviewTab(1); }
+                });
+            }
+
             btnLocalFpVlc = (Button) findViewById(R.id.btn_local_fp_vlc);
             btnLocalFpArt = (Button) findViewById(R.id.btn_local_fp_art);
             btnLocalFpWrite = (Button) findViewById(R.id.btn_local_fp_write);
@@ -1469,10 +1494,22 @@ public class MainActivity extends Activity {
             btnLocalSearchClear = (Button) findViewById(R.id.btn_local_search_clear);
             btnLocalRescan = (Button) findViewById(R.id.btn_local_rescan);
             btnLocalFoldersManage = (Button) findViewById(R.id.btn_local_folders_manage);
+            btnLocalReviewManage = (Button) findViewById(R.id.btn_local_review_manage);
             btnLocalSubSongs = (Button) findViewById(R.id.btn_local_sub_songs);
             btnLocalSubArtists = (Button) findViewById(R.id.btn_local_sub_artists);
             btnLocalSubAlbums = (Button) findViewById(R.id.btn_local_sub_albums);
+            btnLocalSubUnindexed = (Button) findViewById(R.id.btn_local_sub_unindexed);
             localLibraryItemsContainer = (LinearLayout) findViewById(R.id.local_library_items_container);
+
+            if (btnLocalReviewManage != null) {
+                btnLocalReviewManage.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showLocalScreen(3);
+                        switchReviewTab(0);
+                    }
+                });
+            }
 
             if (btnLocalSubSongs != null) {
                 btnLocalSubSongs.setOnClickListener(new View.OnClickListener() {
@@ -1489,6 +1526,11 @@ public class MainActivity extends Activity {
                     @Override public void onClick(View v) { switchLocalLibrarySubTab(2); }
                 });
             }
+            if (btnLocalSubUnindexed != null) {
+                btnLocalSubUnindexed.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { switchLocalLibrarySubTab(3); }
+                });
+            }
 
             if (btnLocalSearchClear != null) {
                 btnLocalSearchClear.setOnClickListener(new View.OnClickListener() {
@@ -1497,7 +1539,11 @@ public class MainActivity extends Activity {
                         if (localSearchInput != null) localSearchInput.setText("");
                         currentLocalFilterArtist = null;
                         currentLocalFilterAlbum = null;
-                        loadLocalSongs("");
+                        if (currentLocalSubTab == 3) {
+                            loadLocalUnindexed("");
+                        } else {
+                            loadLocalSongs("");
+                        }
                     }
                 });
             }
@@ -1530,6 +1576,8 @@ public class MainActivity extends Activity {
                     public void afterTextChanged(android.text.Editable s) {
                         if (currentLocalSubTab == 0) {
                             loadLocalSongs(s.toString().trim());
+                        } else if (currentLocalSubTab == 3) {
+                            loadLocalUnindexed(s.toString().trim());
                         }
                     }
                 });
@@ -4165,6 +4213,9 @@ public class MainActivity extends Activity {
                                 int pct = prog != null ? prog.optInt("progress_percent", 0) : 0;
                                 String curr = prog != null ? prog.optString("current_file", "") : "";
                                 int total = json.optInt("total_songs", 0);
+                                if (prog != null && prog.has("songs_indexed")) {
+                                    total = prog.optInt("songs_indexed", total);
+                                }
                                 int inc = json.optInt("incomplete_count", 0);
 
                                 if (localIdxBar != null) localIdxBar.setProgress(pct);
@@ -4177,9 +4228,14 @@ public class MainActivity extends Activity {
                                 } else {
                                     isLocalIndexingPolling = false;
                                     showToast("Indexing complete! " + total + " songs indexed.", true);
-                                    if (inc > 0) {
+                                    int unindexed = json.optInt("unindexed_count", 0);
+                                    if (inc > 0 || unindexed > 0) {
                                         showLocalScreen(3);
-                                        loadIncompleteSongs();
+                                        if (inc > 0) {
+                                            switchReviewTab(0);
+                                        } else {
+                                            switchReviewTab(1);
+                                        }
                                     } else {
                                         showLocalScreen(4);
                                         switchLocalLibrarySubTab(currentLocalSubTab);
@@ -4203,6 +4259,193 @@ public class MainActivity extends Activity {
         isLocalIndexingPolling = true;
         handler.removeCallbacks(pollLocalIndexingRunnable);
         handler.post(pollLocalIndexingRunnable);
+    }
+
+    private void switchReviewTab(int tab) {
+        currentReviewTab = tab;
+        if (btnLocalReviewIncomplete != null) {
+            btnLocalReviewIncomplete.setTextColor(tab == 0 ? 0xFF00d4ff : 0xFF8892b0);
+            btnLocalReviewIncomplete.setBackgroundColor(tab == 0 ? 0xFF1a1f36 : 0xFF111827);
+        }
+        if (btnLocalReviewUnindexed != null) {
+            btnLocalReviewUnindexed.setTextColor(tab == 1 ? 0xFF00d4ff : 0xFF8892b0);
+            btnLocalReviewUnindexed.setBackgroundColor(tab == 1 ? 0xFF1a1f36 : 0xFF111827);
+        }
+        if (localFpTitle != null) {
+            localFpTitle.setText(tab == 0 ? "Songs Needing Metadata / Fingerprinting" : "Unindexed & Failed Files");
+        }
+        if (localFpSubtitle != null) {
+            localFpSubtitle.setText(tab == 0
+                ? "Found songs with incomplete metadata or missing album artwork."
+                : "Files that could not be indexed (non-audio, unsupported format, or corrupt).");
+        }
+        if (localFpActionsContainer != null) {
+            localFpActionsContainer.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
+        }
+        if (tab == 0) {
+            loadIncompleteSongs();
+        } else {
+            loadUnindexedFiles(localFpItemsContainer, "");
+        }
+    }
+
+    private void loadLocalUnindexed(String query) {
+        loadUnindexedFiles(localLibraryItemsContainer, query);
+    }
+
+    private void loadUnindexedFiles(final LinearLayout targetContainer, final String filterQuery) {
+        if (api == null || targetContainer == null) return;
+        targetContainer.removeAllViews();
+        TextView loading = new TextView(this);
+        loading.setText("Loading unindexed files...");
+        loading.setTextColor(0xFF8892b0);
+        loading.setPadding(15, 20, 15, 20);
+        targetContainer.addView(loading);
+
+        api.get("/api/indexer/unindexed", new ApiClient.Callback() {
+            @Override
+            public void onSuccess(final String response) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            JSONObject json = new JSONObject(response);
+                            JSONArray files = json.optJSONArray("unindexed");
+                            renderUnindexedList(files, targetContainer, filterQuery);
+                        } catch (Exception e) {
+                            renderUnindexedList(null, targetContainer, filterQuery);
+                        }
+                    }
+                });
+            }
+            @Override
+            public void onError(String error) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        targetContainer.removeAllViews();
+                        TextView err = new TextView(MainActivity.this);
+                        err.setText("Failed to load unindexed files.");
+                        err.setTextColor(0xFFff5555);
+                        err.setPadding(15, 20, 15, 20);
+                        targetContainer.addView(err);
+                    }
+                });
+            }
+        });
+    }
+
+    private void renderUnindexedList(JSONArray files, LinearLayout targetContainer, String query) {
+        if (targetContainer == null) return;
+        targetContainer.removeAllViews();
+
+        if (files == null || files.length() == 0) {
+            TextView none = new TextView(this);
+            none.setText("No unindexed files found. All files were successfully processed!");
+            none.setTextColor(0xFF00ffaa);
+            none.setTextSize(14);
+            none.setPadding(15, 20, 15, 20);
+            targetContainer.addView(none);
+            return;
+        }
+
+        String q = query != null ? query.trim().toLowerCase() : "";
+        int shownCount = 0;
+
+        for (int i = 0; i < files.length(); i++) {
+            JSONObject u = files.optJSONObject(i);
+            if (u == null) continue;
+
+            String fileName = u.optString("file_name", "Unknown File");
+            String filePath = u.optString("file_path", "");
+            String reason = u.optString("reason", "Not indexed");
+            String errorDetails = u.optString("error_details", "");
+            String size = u.optString("file_size_human", "");
+
+            if (!q.isEmpty()) {
+                if (!fileName.toLowerCase().contains(q) && !filePath.toLowerCase().contains(q) && !reason.toLowerCase().contains(q)) {
+                    continue;
+                }
+            }
+            shownCount++;
+
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackgroundColor(0xFF111827);
+            card.setPadding(12, 10, 12, 10);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.FILL_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            clp.setMargins(0, 0, 0, 8);
+            card.setLayoutParams(clp);
+
+            // Row 1: File name + Type Badge
+            LinearLayout r1 = new LinearLayout(this);
+            r1.setOrientation(LinearLayout.HORIZONTAL);
+            r1.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            r1.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.FILL_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+            TextView tvName = new TextView(this);
+            tvName.setText(fileName);
+            tvName.setTextColor(0xFFffffff);
+            tvName.setTextSize(14);
+            tvName.setTypeface(null, Typeface.BOLD);
+            tvName.setSingleLine(true);
+            tvName.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+            tvName.setLayoutParams(nlp);
+            r1.addView(tvName);
+
+            boolean isCorrupt = reason.toLowerCase().contains("corrupt") || reason.toLowerCase().contains("failure") || (!errorDetails.isEmpty() && !"null".equals(errorDetails));
+            TextView tvBadge = new TextView(this);
+            tvBadge.setText(isCorrupt ? "  ⚠️ CORRUPT  " : "  ℹ️ NON-AUDIO  ");
+            tvBadge.setTextColor(isCorrupt ? 0xFFff5555 : 0xFF8892b0);
+            tvBadge.setTextSize(11);
+            tvBadge.setTypeface(null, Typeface.BOLD);
+            tvBadge.setBackgroundColor(isCorrupt ? 0xFF3a1414 : 0xFF1a1f36);
+            tvBadge.setPadding(6, 3, 6, 3);
+            r1.addView(tvBadge);
+            card.addView(r1);
+
+            // Row 2: Reason
+            TextView tvReason = new TextView(this);
+            tvReason.setText("Reason: " + reason);
+            tvReason.setTextColor(0xFFffa726);
+            tvReason.setTextSize(12);
+            tvReason.setPadding(0, 4, 0, 0);
+            card.addView(tvReason);
+
+            if (!errorDetails.isEmpty() && !"null".equals(errorDetails)) {
+                TextView tvErr = new TextView(this);
+                tvErr.setText("Error: " + errorDetails);
+                tvErr.setTextColor(0xFFff7777);
+                tvErr.setTextSize(11);
+                tvErr.setPadding(0, 2, 0, 0);
+                card.addView(tvErr);
+            }
+
+            // Row 3: Path + Size
+            TextView tvPath = new TextView(this);
+            String sub = filePath;
+            if (!size.isEmpty()) sub += " (" + size + ")";
+            tvPath.setText(sub);
+            tvPath.setTextColor(0xFF667085);
+            tvPath.setTextSize(11);
+            tvPath.setSingleLine(true);
+            tvPath.setEllipsize(TextUtils.TruncateAt.END);
+            tvPath.setPadding(0, 2, 0, 0);
+            card.addView(tvPath);
+
+            targetContainer.addView(card);
+        }
+
+        if (shownCount == 0 && !q.isEmpty()) {
+            TextView noMatch = new TextView(this);
+            noMatch.setText("No unindexed files matched '" + query + "'.");
+            noMatch.setTextColor(0xFF8892b0);
+            noMatch.setPadding(15, 20, 15, 20);
+            targetContainer.addView(noMatch);
+        }
     }
 
     private void loadIncompleteSongs() {
@@ -4368,6 +4611,10 @@ public class MainActivity extends Activity {
             btnLocalSubAlbums.setTextColor(index == 2 ? 0xFF00d4ff : 0xFF8892b0);
             btnLocalSubAlbums.setBackgroundColor(index == 2 ? 0xFF1a1f36 : 0xFF111827);
         }
+        if (btnLocalSubUnindexed != null) {
+            btnLocalSubUnindexed.setTextColor(index == 3 ? 0xFF00d4ff : 0xFF8892b0);
+            btnLocalSubUnindexed.setBackgroundColor(index == 3 ? 0xFF1a1f36 : 0xFF111827);
+        }
 
         String query = localSearchInput != null ? localSearchInput.getText().toString().trim() : "";
         if (index == 0) {
@@ -4376,6 +4623,8 @@ public class MainActivity extends Activity {
             loadLocalArtists();
         } else if (index == 2) {
             loadLocalAlbums();
+        } else if (index == 3) {
+            loadLocalUnindexed(query);
         }
     }
 

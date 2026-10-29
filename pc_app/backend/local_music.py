@@ -56,6 +56,9 @@ class LocalMusicManager:
             "status": "idle",
             "progress_percent": 0,
             "current_file": "",
+            "current_file_index": 0,
+            "total_files": 0,
+            "songs_indexed": 0,
             "total_songs": 0,
             "last_scan_time": 0,
         }
@@ -65,6 +68,8 @@ class LocalMusicManager:
             "status": "idle",
             "progress_percent": 0,
             "current_file": "",
+            "current_file_index": 0,
+            "total_files": 0,
             "enriched_count": 0,
         }
 
@@ -301,8 +306,47 @@ class LocalMusicManager:
                 incomplete.append(s_copy)
         return incomplete
 
+    def get_unindexed_files(self) -> List[Dict[str, Any]]:
+        """Return non-audio or failed/corrupt files from unindexed_files.json."""
+        if not self.unindexed_json_path.exists():
+            return []
+        try:
+            with open(self.unindexed_json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                elif isinstance(data, dict) and "files" in data:
+                    return data.get("files", [])
+        except Exception as e:
+            logger.error(f"Error loading unindexed files: {e}")
+        return []
+
+    def get_indexing_ui_state(self) -> Dict[str, Any]:
+        """Instantaneous in-memory snapshot for high-speed UI updates (0 disk I/O)."""
+        return {
+            "is_scanning": self._is_scanning,
+            "scan_progress": dict(self._scan_progress),
+            "is_fingerprinting": self._is_fingerprinting,
+            "fingerprint_progress": dict(self._fingerprint_progress),
+        }
+
     def get_catalog_stats(self) -> Dict[str, Any]:
         """Return library summary statistics and status."""
+        if self._is_scanning:
+            live_indexed = self._scan_progress.get("songs_indexed", 0)
+            return {
+                "total_songs": live_indexed,
+                "unindexed_count": 0,
+                "incomplete_count": 0,
+                "configured_folders": self.get_configured_folders(),
+                "has_configured_folders": len(self.get_configured_folders()) > 0,
+                "is_scanning": True,
+                "scan_progress": dict(self._scan_progress),
+                "is_fingerprinting": self._is_fingerprinting,
+                "fingerprint_progress": dict(self._fingerprint_progress),
+                "player_status": self.get_player_status(),
+            }
+
         songs = self.get_songs()
         unindexed_count = 0
         if self.unindexed_json_path.exists():
@@ -326,9 +370,9 @@ class LocalMusicManager:
             "configured_folders": configured_folders,
             "has_configured_folders": len(configured_folders) > 0,
             "is_scanning": self._is_scanning,
-            "scan_progress": self._scan_progress,
+            "scan_progress": dict(self._scan_progress),
             "is_fingerprinting": self._is_fingerprinting,
-            "fingerprint_progress": self._fingerprint_progress,
+            "fingerprint_progress": dict(self._fingerprint_progress),
             "player_status": self.get_player_status(),
         }
 
@@ -355,8 +399,16 @@ class LocalMusicManager:
 
     def _run_scan_worker(self, folders: List[str], force_full: bool):
         self._is_scanning = True
-        self._scan_progress["status"] = "scanning"
-        self._scan_progress["progress_percent"] = 0
+        self._scan_progress = {
+            "status": "scanning",
+            "progress_percent": 0,
+            "current_file": "",
+            "current_file_index": 0,
+            "total_files": 0,
+            "songs_indexed": 0,
+            "total_songs": 0,
+            "last_scan_time": 0,
+        }
 
         try:
             cached_songs = {}
@@ -370,19 +422,50 @@ class LocalMusicManager:
                 except Exception as ex:
                     logger.warning(f"Could not load cache: {ex}")
 
+            # Count valid cached songs that belong to target folders
+            valid_cached_count = 0
+            if cached_songs and not force_full:
+                for s_path in cached_songs.keys():
+                    if os.path.exists(s_path):
+                        for f in folders:
+                            try:
+                                if os.path.commonpath([os.path.abspath(s_path), os.path.abspath(f)]) == os.path.abspath(f):
+                                    valid_cached_count += 1
+                                    break
+                            except Exception:
+                                pass
+
+            indexed_count = valid_cached_count
+            self._scan_progress["songs_indexed"] = indexed_count
+            self._scan_progress["total_songs"] = indexed_count
+
             indexer = AudioIndexer(enable_vlc_enrichment=True)
+
+            def on_song(meta):
+                nonlocal indexed_count
+                indexed_count += 1
+                self._scan_progress["songs_indexed"] = indexed_count
+                self._scan_progress["total_songs"] = indexed_count
 
             def on_progress(current: int, total: int, file_path: str):
                 pct = int((current / max(1, total)) * 100)
+                fname = os.path.basename(file_path)
                 self._scan_progress["progress_percent"] = pct
-                self._scan_progress["current_file"] = os.path.basename(file_path)
+                self._scan_progress["current_file"] = fname
+                self._scan_progress["current_file_index"] = current
+                self._scan_progress["total_files"] = total
+                self._scan_progress["songs_indexed"] = indexed_count
+                self._scan_progress["total_songs"] = indexed_count
+                # Live terminal update
+                print(f"\r[Media Centre Indexer] [{current}/{total}] ({pct}%) Indexing: {fname[:40]:<40}", end="", flush=True)
 
             result = indexer.scan_folders(
                 folder_paths=folders,
                 recursive=True,
-                cached_songs=cached_songs,
-                cached_unindexed=cached_unindexed,
+                cached_songs=cached_songs if not force_full else {},
+                cached_unindexed=cached_unindexed if not force_full else {},
                 progress_callback=on_progress,
+                on_song_indexed=on_song,
             )
 
             StorageManager.save_scan_result(
@@ -392,8 +475,10 @@ class LocalMusicManager:
             )
 
             self._scan_progress["status"] = "completed"
+            self._scan_progress["songs_indexed"] = len(result.songs)
             self._scan_progress["total_songs"] = len(result.songs)
             self._scan_progress["last_scan_time"] = result.elapsed_time_seconds
+            print(f"\n[Media Centre Indexer] Scan complete: {len(result.songs)} songs indexed in {result.elapsed_time_seconds:.2f}s")
             logger.info(f"Scan complete: {len(result.songs)} songs indexed in {result.elapsed_time_seconds:.2f}s")
         except Exception as e:
             logger.error(f"Scan worker failed: {e}")
@@ -421,6 +506,8 @@ class LocalMusicManager:
             "status": "fingerprinting",
             "progress_percent": 0,
             "current_file": "",
+            "current_file_index": 0,
+            "total_files": 0,
             "enriched_count": 0,
         }
         try:
@@ -432,9 +519,12 @@ class LocalMusicManager:
             incomplete_list = [s for s in all_list if s.has_incomplete_metadata or not s.has_album_art]
             total = len(incomplete_list)
             enriched = 0
+            self._fingerprint_progress["total_files"] = total
 
             for idx, song in enumerate(incomplete_list, start=1):
-                self._fingerprint_progress["current_file"] = song.file_name
+                fname = song.file_name
+                self._fingerprint_progress["current_file"] = fname
+                self._fingerprint_progress["current_file_index"] = idx
                 self._fingerprint_progress["progress_percent"] = int((idx / max(1, total)) * 100)
                 try:
                     changed = VLCMetadataEnricher.enrich(song)
@@ -443,10 +533,12 @@ class LocalMusicManager:
                         self._fingerprint_progress["enriched_count"] = enriched
                 except Exception:
                     pass
+                print(f"\r[Media Centre Fingerprinter] [{idx}/{total}] Fingerprinting: {fname[:40]:<40}", end="", flush=True)
 
             StorageManager.update_songs_catalog(all_list, str(self.songs_json_path))
             self._fingerprint_progress["status"] = "completed"
             self._fingerprint_progress["progress_percent"] = 100
+            print(f"\n[Media Centre Fingerprinter] Complete: {enriched} songs enriched.")
         except Exception as e:
             logger.error(f"Fingerprinting failed: {e}")
             self._fingerprint_progress["status"] = f"error: {e}"
