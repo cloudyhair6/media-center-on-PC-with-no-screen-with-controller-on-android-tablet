@@ -5,6 +5,9 @@ import subprocess
 import importlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_indexer_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'PyMusicIndexer')
+if os.path.exists(_indexer_path) and _indexer_path not in sys.path:
+    sys.path.insert(0, _indexer_path)
 
 _REQUIRED_PACKAGES = {
     'PySide6': 'PySide6',

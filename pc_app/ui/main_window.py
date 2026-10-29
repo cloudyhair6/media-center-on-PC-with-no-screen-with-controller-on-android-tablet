@@ -77,6 +77,42 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self._port_label)
         
+        # Indexing Progress Container (below Port)
+        self._index_container = QWidget()
+        self._index_container.setStyleSheet("background: transparent;")
+        index_layout = QVBoxLayout(self._index_container)
+        index_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        index_layout.setContentsMargins(0, 10, 0, 0)
+        index_layout.setSpacing(6)
+        
+        self._index_status_label = QLabel("Indexing Local Music... 0%")
+        self._index_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._index_status_label.setStyleSheet(
+            f'color: {Colors.PRIMARY}; font-size: 14px; font-weight: bold; background: transparent;'
+        )
+        index_layout.addWidget(self._index_status_label)
+        
+        self._index_progress_bar = QProgressBar()
+        self._index_progress_bar.setRange(0, 100)
+        self._index_progress_bar.setValue(0)
+        self._index_progress_bar.setFixedSize(360, 14)
+        self._index_progress_bar.setTextVisible(False)
+        self._index_progress_bar.setStyleSheet(
+            f'''
+            QProgressBar {{
+                background-color: rgba(255, 255, 255, 0.15);
+                border-radius: 7px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {Colors.PRIMARY};
+                border-radius: 7px;
+            }}
+            '''
+        )
+        index_layout.addWidget(self._index_progress_bar)
+        self._index_container.setVisible(False)
+        layout.addWidget(self._index_container)
+        
         layout.addStretch(4)
         
         # Volume OSD (overlay)
@@ -169,6 +205,37 @@ class MainWindow(QMainWindow):
         now = datetime.now()
         self._clock.setText(now.strftime('%H:%M'))
         self._date.setText(now.strftime('%A, %B %d, %Y'))
+        self._check_indexing_status()
+
+    def _check_indexing_status(self):
+        try:
+            from backend.local_music import LocalMusicManager
+            mgr = LocalMusicManager.get_instance()
+            stats = mgr.get_catalog_stats()
+            if stats.get("is_scanning", False):
+                prog = stats.get("scan_progress", {})
+                pct = prog.get("progress_percent", 0)
+                curr = prog.get("current_file", "")
+                label_txt = f"Indexing Local Music... {pct}%"
+                if curr:
+                    label_txt += f" ({curr})"
+                self._index_status_label.setText(label_txt)
+                self._index_progress_bar.setValue(pct)
+                self._index_container.setVisible(True)
+            elif stats.get("is_fingerprinting", False):
+                prog = stats.get("fingerprint_progress", {})
+                pct = prog.get("progress_percent", 0)
+                curr = prog.get("current_file", "")
+                label_txt = f"Fingerprinting... {pct}%"
+                if curr:
+                    label_txt += f" ({curr})"
+                self._index_status_label.setText(label_txt)
+                self._index_progress_bar.setValue(pct)
+                self._index_container.setVisible(True)
+            else:
+                self._index_container.setVisible(False)
+        except Exception:
+            pass
     
     def _show_volume_osd(self, vol):
         self._volume_label.setText(f'{vol}%')
@@ -236,6 +303,8 @@ class MainWindow(QMainWindow):
         elif command == 'spotify_launch':
             from backend.spotify_control import SpotifyControl
             SpotifyControl.launch()
+        elif command == 'launch_indexer':
+            pass
     
     def keyPressEvent(self, event):
         key = event.key()

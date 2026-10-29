@@ -274,15 +274,24 @@ html, body {
 <div class="page" id="page-files">
 <div class="main">
     <div style="margin-top: 10px; margin-bottom: 10px; text-align: left; font-size: 18px; font-weight: bold; color: #00d4ff;">
-        Local Videos
+        Local Music Library (PyMusicIndexer)
     </div>
-    <div class="row" style="margin-bottom:10px">
-        <div class="btn btn-accent" style="width: 100%; padding: 8px 0;" onclick="loadFiles()">
-            REFRESH FILES
+    <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+        <div class="btn btn-accent" style="flex: 1; padding: 10px 0; font-size: 13px;" onclick="loadFiles()">
+            REFRESH
+        </div>
+        <div class="btn" style="flex: 1; padding: 10px 0; font-size: 13px; border-color: #00e676; color: #00e676;" onclick="scanIndexer()">
+            SMART RESCAN
+        </div>
+        <div class="btn" style="flex: 1; padding: 10px 0; font-size: 13px;" onclick="launchIndexerGUI()">
+            OPEN GUI
         </div>
     </div>
-    <div id="filesContent" style="text-align: left; background: rgba(20,25,45,0.85); padding: 5px; border-radius: 12px;">
-        <div style="color:#8892b0; padding:10px;">Click refresh to load videos...</div>
+    <div style="margin-bottom: 10px;">
+        <input type="text" id="localSongFilter" placeholder="Filter tracks, artists, albums..." onkeyup="filterLocalSongs()" style="width: 100%; padding: 10px; background: rgba(20,25,45,0.9); border: 1px solid rgba(0,212,255,0.4); border-radius: 8px; color: #fff; font-size: 14px;">
+    </div>
+    <div id="filesContent" style="text-align: left; background: rgba(20,25,45,0.85); padding: 5px; border-radius: 12px; max-height: 60vh; overflow-y: auto;">
+        <div style="color:#8892b0; padding:10px;">Click refresh to load local songs...</div>
     </div>
 </div>
 </div>
@@ -955,43 +964,103 @@ function pollSystemStats() {
     xhr.send();
 }
 
-// Files
+// Local Music & PyMusicIndexer
+var _cachedLocalSongs = [];
+
 function loadFiles() {
     var cnt = document.getElementById('filesContent');
-    cnt.innerHTML = '<div style="color:#8892b0; padding:10px;">Loading files...</div>';
+    cnt.innerHTML = '<div style="color:#8892b0; padding:10px;">Loading music library...</div>';
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/system/files', true);
     xhr.onreadystatechange = function() {
         if (xhr.readyState === 4 && xhr.status === 200) {
             try {
                 var d = JSON.parse(xhr.responseText);
-                var html = '';
-                if (d.items && d.items.length > 0) {
-                    for (var i = 0; i < d.items.length; i++) {
-                        var f = d.items[i];
-                        html += '<div style="padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: pointer;" onclick="playLocalFile(\'' + encodeURIComponent(f.path) + '\')">';
-                        html += '<div style="font-weight: bold; color: #fff;">' + f.name + '</div>';
-                        html += '<div style="font-size: 12px; color: #8892b0; word-break: break-all;">' + f.path + '</div>';
-                        html += '</div>';
-                    }
-                } else {
-                    html = '<div style="color:#8892b0; padding:10px;">No videos found in Videos folder.</div>';
-                }
-                cnt.innerHTML = html;
+                _cachedLocalSongs = d.items || [];
+                renderLocalSongs(_cachedLocalSongs);
             } catch(e) {
-                cnt.innerHTML = '<div style="color:#ff5252; padding:10px;">Error parsing files</div>';
+                cnt.innerHTML = '<div style="color:#ff5252; padding:10px;">Error loading music catalog</div>';
             }
         }
     };
     xhr.send();
 }
 
-function playLocalFile(path) {
+function renderLocalSongs(items) {
+    var cnt = document.getElementById('filesContent');
+    if (!items || items.length === 0) {
+        cnt.innerHTML = '<div style="color:#8892b0; padding:15px; text-align:center;">No local tracks indexed.<br><br><span style="color:#00d4ff; cursor:pointer; text-decoration:underline;" onclick="scanIndexer()">Run Smart Rescan</span> to index your music folders.</div>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+        var f = items[i];
+        var artHtml = f.art_url ? '<img src="' + f.art_url + '" style="width:44px; height:44px; border-radius:6px; object-fit:cover; margin-right:12px; flex-shrink:0;">' : '<div style="width:44px; height:44px; border-radius:6px; background:#1a2035; color:#00d4ff; display:flex; align-items:center; justify-content:center; font-size:18px; margin-right:12px; flex-shrink:0;">&#9835;</div>';
+        var subText = (f.artist || 'Unknown Artist') + (f.album ? ' &bull; ' + f.album : '');
+        var metaPill = '';
+        if (f.duration) metaPill += f.duration;
+        if (f.format) metaPill += (metaPill ? ' &bull; ' : '') + f.format.toUpperCase();
+        if (f.bitrate) metaPill += ' ' + f.bitrate + 'k';
+
+        html += '<div style="display:flex; align-items:center; padding:10px; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="playLocalFile(\'' + encodeURIComponent(f.path) + '\', \'' + encodeURIComponent(f.name).replace(/'/g, "\\'") + '\')">';
+        html += artHtml;
+        html += '<div style="flex:1; min-width:0;">';
+        html += '<div style="font-weight:bold; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + f.name + '</div>';
+        html += '<div style="font-size:12px; color:#8892b0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px;">' + subText + '</div>';
+        if (metaPill) html += '<div style="font-size:11px; color:#00d4ff; margin-top:2px;">' + metaPill + '</div>';
+        html += '</div>';
+        html += '<div style="padding:6px 12px; background:rgba(0,212,255,0.15); border:1px solid #00d4ff; border-radius:8px; color:#00d4ff; font-size:12px; font-weight:bold; margin-left:8px;">PLAY</div>';
+        html += '</div>';
+    }
+    cnt.innerHTML = html;
+}
+
+function filterLocalSongs() {
+    var q = (document.getElementById('localSongFilter').value || '').toLowerCase();
+    if (!q) {
+        renderLocalSongs(_cachedLocalSongs);
+        return;
+    }
+    var filtered = _cachedLocalSongs.filter(function(s) {
+        return (s.name && s.name.toLowerCase().indexOf(q) !== -1) ||
+               (s.artist && s.artist.toLowerCase().indexOf(q) !== -1) ||
+               (s.album && s.album.toLowerCase().indexOf(q) !== -1) ||
+               (s.genre && s.genre.toLowerCase().indexOf(q) !== -1);
+    });
+    renderLocalSongs(filtered);
+}
+
+function scanIndexer() {
+    var cnt = document.getElementById('filesContent');
+    cnt.innerHTML = '<div style="color:#00e676; padding:15px; text-align:center;">Starting Smart HDD incremental scan...</div>';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/indexer/scan', true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            showToast('Scanning music library...');
+            setTimeout(loadFiles, 2000);
+        }
+    };
+    xhr.send();
+}
+
+function launchIndexerGUI() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/indexer/launch_gui', true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            showToast('Opened PyMusicIndexer GUI');
+        }
+    };
+    xhr.send();
+}
+
+function playLocalFile(path, name) {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/system/play_file?path=' + path, true);
     xhr.onreadystatechange = function() {
         if (xhr.readyState === 4 && xhr.status === 200) {
-            showToast('Playing on MiniPC');
+            showToast('Playing: ' + (name ? decodeURIComponent(name) : 'Local Track'));
         }
     };
     xhr.send();

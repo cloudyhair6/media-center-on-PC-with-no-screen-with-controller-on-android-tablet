@@ -138,6 +138,14 @@ class SpotifyControl:
         return False
 
     @staticmethod
+    def pause() -> None:
+        """Pause Spotify playback."""
+        try:
+            SpotifyControl._run_cli(["pause"])
+        except Exception:
+            pass
+
+    @staticmethod
     def play_pause() -> None:
         info = SpotifyControl.get_now_playing(force_fetch=True)
         if info.get("playing", False):

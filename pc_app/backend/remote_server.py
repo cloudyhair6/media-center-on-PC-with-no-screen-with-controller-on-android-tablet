@@ -21,7 +21,18 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-from PySide6.QtCore import QObject, Signal
+try:
+    from PySide6.QtCore import QObject, Signal
+except Exception:
+    try:
+        from PyQt6.QtCore import QObject, pyqtSignal as Signal
+    except Exception:
+        class QObject:
+            pass
+        class Signal:
+            def __init__(self, *args): pass
+            def emit(self, *args): pass
+            def connect(self, *args): pass
 
 
 REMOTE_DIR = Path(__file__).resolve().parent.parent / "remote"
@@ -32,6 +43,7 @@ VALID_COMMANDS = {
     "volume_up", "volume_down",
     "play_pause", "mute",
     "spotify_play_pause", "spotify_next", "spotify_prev", "spotify_launch",
+    "launch_indexer",
 }
 
 
@@ -69,6 +81,11 @@ class _RemoteHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/command/"):
             cmd = path.split("/api/command/", 1)[1].split("?")[0]
             if cmd in ("spotify_play_pause", "spotify_next", "spotify_prev", "spotify_launch"):
+                try:
+                    from backend.local_music import LocalMusicManager
+                    LocalMusicManager.get_instance().pause()
+                except Exception:
+                    pass
                 try:
                     from backend.spotify_control import SpotifyControl
                     if cmd == "spotify_play_pause":
@@ -357,6 +374,11 @@ class _RemoteHandler(BaseHTTPRequestHandler):
         # API: Spotify play URI
         if path.startswith("/api/spotify/play"):
             try:
+                from backend.local_music import LocalMusicManager
+                LocalMusicManager.get_instance().pause()
+            except Exception:
+                pass
+            try:
                 from urllib.parse import urlparse, parse_qs
                 uri = parse_qs(urlparse(self.path).query).get("uri", [""])[0]
                 if uri:
@@ -530,6 +552,45 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_error(404, "APK not found")
                 return
+            elif action == "files":
+                try:
+                    import os
+                    from backend.local_music import LocalMusicManager
+                    mgr = LocalMusicManager.get_instance()
+                    songs = mgr.get_songs()
+                    if not songs and not mgr._is_scanning:
+                        mgr.start_scan_async()
+                    items = []
+                    for s in songs:
+                        items.append({
+                            "name": s.get("title") or os.path.basename(s.get("file_path", "")),
+                            "artist": s.get("contributing_artists") or s.get("artist") or "",
+                            "album": s.get("album") or "",
+                            "genre": s.get("genre") or "",
+                            "duration": s.get("duration_formatted") or "",
+                            "format": s.get("format") or "",
+                            "bitrate": s.get("bitrate_kbps") or "",
+                            "art_url": s.get("album_art_web_url") or "",
+                            "path": s.get("file_path", "")
+                        })
+                    self._json_response(200, {"items": items, "total": len(items), "is_scanning": mgr._is_scanning})
+                except Exception as e:
+                    self._json_response(500, {"error": str(e)})
+                return
+            elif action == "play_file":
+                try:
+                    from urllib.parse import urlparse, parse_qs
+                    from backend.local_music import LocalMusicManager
+                    qs = parse_qs(urlparse(self.path).query)
+                    file_path = qs.get("path", [""])[0]
+                    if file_path:
+                        ok = LocalMusicManager.get_instance().play_file(file_path)
+                        self._json_response(200, {"ok": ok, "path": file_path})
+                    else:
+                        self._json_response(400, {"error": "Missing path"})
+                except Exception as e:
+                    self._json_response(500, {"error": str(e)})
+                return
             
             try:
                 from backend.system_control import SystemControl
@@ -572,6 +633,106 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                     self._json_response(400, {"error": "Unknown system command"})
             except Exception as e:
                 self._json_response(500, {"error": str(e)})
+
+        # API: Local PyMusicIndexer
+        if path.startswith("/api/indexer/"):
+            try:
+                from urllib.parse import urlparse, parse_qs
+                from backend.local_music import LocalMusicManager
+                action = path.split("/api/indexer/", 1)[1].split("?")[0]
+                mgr = LocalMusicManager.get_instance()
+                parsed = parse_qs(urlparse(self.path).query)
+
+                if action == "status":
+                    self._json_response(200, mgr.get_catalog_stats())
+                elif action == "browse":
+                    p = parsed.get("path", [""])[0]
+                    self._json_response(200, mgr.browse_path(p))
+                elif action == "folders":
+                    self._json_response(200, {"folders": mgr.get_configured_folders()})
+                elif action == "folders/add":
+                    f = parsed.get("folder", [""])[0]
+                    if f:
+                        updated = mgr.add_configured_folder(f)
+                        self._json_response(200, {"ok": True, "folders": updated})
+                    else:
+                        self._json_response(400, {"error": "Missing folder"})
+                elif action == "folders/remove":
+                    f = parsed.get("folder", [""])[0]
+                    if f:
+                        updated = mgr.remove_configured_folder(f)
+                        self._json_response(200, {"ok": True, "folders": updated})
+                    else:
+                        self._json_response(400, {"error": "Missing folder"})
+                elif action == "songs":
+                    songs = mgr.get_songs()
+                    q = parsed.get("q", [""])[0].strip().lower()
+                    artist = parsed.get("artist", [""])[0].strip().lower()
+                    album = parsed.get("album", [""])[0].strip().lower()
+                    if q or artist or album:
+                        filtered = []
+                        for s in songs:
+                            s_title = (s.get("title") or "").lower()
+                            s_artist = (s.get("contributing_artists") or s.get("artist") or "").lower()
+                            s_album = (s.get("album") or "").lower()
+                            s_genre = (s.get("genre") or "").lower()
+                            if q and (q not in s_title and q not in s_artist and q not in s_album and q not in s_genre):
+                                continue
+                            if artist and artist != s_artist and artist not in s_artist:
+                                continue
+                            if album and album != s_album and album not in s_album:
+                                continue
+                            filtered.append(s)
+                        songs = filtered
+                    self._json_response(200, {"songs": songs, "total": len(songs)})
+                elif action == "artists":
+                    self._json_response(200, {"artists": mgr.get_artists()})
+                elif action == "albums":
+                    self._json_response(200, {"albums": mgr.get_albums()})
+                elif action == "incomplete":
+                    self._json_response(200, {"incomplete": mgr.get_incomplete_songs()})
+                elif action == "scan":
+                    folders = parsed.get("folders", [])
+                    if not folders:
+                        f_param = parsed.get("folder", [""])[0]
+                        if f_param:
+                            folders = [f_param]
+                    force = parsed.get("force", ["false"])[0].lower() in ("true", "1")
+                    started = mgr.start_scan_async(folders=folders or None, force_full=force)
+                    self._json_response(200, {"started": started, "is_scanning": mgr._is_scanning})
+                elif action == "fingerprint":
+                    started = mgr.start_fingerprint_async()
+                    self._json_response(200, {"started": started, "is_fingerprinting": mgr._is_fingerprinting})
+                elif action == "fetch_art":
+                    started = mgr.start_fetch_art_async()
+                    self._json_response(200, {"started": started, "is_fingerprinting": mgr._is_fingerprinting})
+                elif action == "write_tags":
+                    started = mgr.start_write_tags_async()
+                    self._json_response(200, {"started": started, "is_fingerprinting": mgr._is_fingerprinting})
+                elif action == "play":
+                    p = parsed.get("path", [""])[0]
+                    if p:
+                        ok = mgr.play_file(p)
+                        self._json_response(200, {"ok": ok, "path": p})
+                    else:
+                        self._json_response(400, {"error": "Missing path"})
+                elif action == "pause":
+                    mgr.pause()
+                    self._json_response(200, {"ok": True})
+                elif action == "resume":
+                    mgr.resume()
+                    self._json_response(200, {"ok": True})
+                elif action == "stop":
+                    mgr.stop()
+                    self._json_response(200, {"ok": True})
+                elif action == "launch_gui":
+                    self._json_response(200, {"ok": True})
+                else:
+                    self._json_response(400, {"error": "Unknown indexer action"})
+            except Exception as e:
+                self._json_response(500, {"error": str(e)})
+            return
+
         # API: Direct image bytes proxy fallback for Android 2.3
         if path.startswith("/api/image_download"):
             try:
