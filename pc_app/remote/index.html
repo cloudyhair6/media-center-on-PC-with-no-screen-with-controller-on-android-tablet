@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>MiniPC Remote</title>
+<title>Media Center Remote</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body {
@@ -145,11 +145,11 @@ html, body {
 <body>
 
 <div class="header">
-    <h1>MiniPC Remote</h1>
+    <h1>Media Center Remote</h1>
     <div class="status"><span class="status-dot" id="dot"></span><span id="stxt">Connecting...</span></div>
 </div>
 <div id="latencyBanner" style="display:none; background: #ffa726; color: #fff; text-align: center; padding: 10px; font-weight: bold; font-size: 14px; position: fixed; top: 0; left: 0; width: 100%; z-index: 10000; box-shadow: 0 4px 10px rgba(0,0,0,0.5);">
-    Waiting for MiniPC...
+    Waiting for Media Center...
 </div>
 
 <div class="tabs">
@@ -353,8 +353,8 @@ html, body {
         </div>
 
         <div class="row" style="margin-bottom: 15px;">
-            <div class="btn" style="width: 80%; padding: 15px 0;" onclick="if(confirm('Are you sure you want to close the MiniPC app?')) sendCmd('/api/system/close_app', this)">
-                CLOSE MINIPC APP
+            <div class="btn" style="width: 80%; padding: 15px 0;" onclick="if(confirm('Are you sure you want to close the Media Center app?')) sendCmd('/api/system/close_app', this)">
+                CLOSE MEDIA CENTER APP
             </div>
         </div>
         
@@ -432,7 +432,7 @@ function send(cmd, btn) {
     var banner = document.getElementById('latencyBanner');
     banner.style.display = 'block';
     banner.style.background = '#ffa726';
-    banner.innerText = 'Waiting for MiniPC...';
+    banner.innerText = 'Waiting for Media Center...';
 
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/command/' + cmd, true);
@@ -1128,7 +1128,7 @@ setInterval(function() { if (currentTab === 'system') pollSystemStats(); }, 3000
 updateSearchArtBtn();
 </script>
 <!-- Kiosk Mode Integrations -->
-<div id="kioskDisconnectBtn" style="position:fixed; top:10px; right:10px; background:rgba(255,0,0,0.8); color:white; padding:10px 15px; border-radius:8px; z-index:9999; font-weight:bold; font-size:14px;" onclick="window.location.href='minipc://disconnect'">
+<div id="kioskDisconnectBtn" style="position:fixed; top:10px; right:10px; background:rgba(255,0,0,0.8); color:white; padding:10px 15px; border-radius:8px; z-index:9999; font-weight:bold; font-size:14px;" onclick="window.location.href='mediacentre://disconnect'">
     Disconnect Tablet
 </div>
 
@@ -1142,7 +1142,7 @@ updateSearchArtBtn();
                 try {
                     var d = JSON.parse(xhr.responseText);
                     if (d.unlock) {
-                        window.location.href = 'minipc://unlock';
+                        window.location.href = 'mediacentre://unlock';
                     }
                 } catch(e) {}
             }

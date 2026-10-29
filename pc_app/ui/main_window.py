@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         self._index_status_label = QLabel("Indexing Local Music... 0%")
         self._index_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._index_status_label.setStyleSheet(
-            f'color: {Colors.PRIMARY}; font-size: 14px; font-weight: bold; background: transparent;'
+            f'color: {Colors.ACCENT}; font-size: 14px; font-weight: bold; background: transparent;'
         )
         index_layout.addWidget(self._index_status_label)
         
@@ -104,7 +104,7 @@ class MainWindow(QMainWindow):
                 border-radius: 7px;
             }}
             QProgressBar::chunk {{
-                background-color: {Colors.PRIMARY};
+                background-color: {Colors.ACCENT};
                 border-radius: 7px;
             }}
             '''
@@ -198,6 +198,23 @@ class MainWindow(QMainWindow):
         self._volume_label.setStyleSheet(
             f'color: {colors.TEXT_PRIMARY}; font-size: {Sizes.FONT_H1}px; font-weight: bold; background: transparent;'
         )
+        if hasattr(self, '_index_status_label'):
+            self._index_status_label.setStyleSheet(
+                f'color: {colors.ACCENT}; font-size: 14px; font-weight: bold; background: transparent;'
+            )
+        if hasattr(self, '_index_progress_bar'):
+            self._index_progress_bar.setStyleSheet(
+                f'''
+                QProgressBar {{
+                    background-color: rgba(255, 255, 255, 0.15);
+                    border-radius: 7px;
+                }}
+                QProgressBar::chunk {{
+                    background-color: {colors.ACCENT};
+                    border-radius: 7px;
+                }}
+                '''
+            )
         self._update_clock()
     
     def _update_clock(self):

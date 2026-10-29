@@ -1947,7 +1947,7 @@ public class MainActivity extends Activity {
                     conn.connect();
                     if (conn.getResponseCode() != 200) return null;
                     java.io.File sdcard = android.os.Environment.getExternalStorageDirectory();
-                    java.io.File apkFile = new java.io.File(sdcard, "minipc_update.apk");
+                    java.io.File apkFile = new java.io.File(sdcard, "mediacentre_update.apk");
                     java.io.InputStream in = conn.getInputStream();
                     java.io.FileOutputStream out = new java.io.FileOutputStream(apkFile);
                     byte[] buffer = new byte[4096];

@@ -3,7 +3,7 @@ Local Music Management & PyMusicIndexer Bridge for Media Centre
 ==============================================================
 Integrates PyMusicIndexer's Smart Incremental HDD Engine,
 metadata extraction, cover art discovery, fingerprinting, and
-audio playback into the MiniPC remote server and tablet app.
+audio playback into the Media Center remote server and tablet app.
 """
 
 from __future__ import annotations
@@ -560,7 +560,7 @@ class LocalMusicManager:
         return self._player
 
     def play_file(self, file_path: str) -> bool:
-        """Play a local audio track on the MiniPC and pause Spotify."""
+        """Play a local audio track on the Media Center and pause Spotify."""
         if not os.path.isfile(file_path):
             logger.error(f"Cannot play missing file: {file_path}")
             return False

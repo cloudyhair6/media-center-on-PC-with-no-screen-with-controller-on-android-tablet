@@ -1,6 +1,6 @@
 # media-center-on-PC-with-no-screen-with-controller-on-android-tablet
 
-Follow the intructions on the latest release [here](https://github.com/cloudyhair6/media-center-on-PC-with-no-screen-with-controller-on-android-tablet/releases/latest) or just download the latest installer\_and\_updater.py [here](https://github.com/cloudyhair6/media-center-on-PC-with-no-screen-with-controller-on-android-tablet/releases/latest/download/installer_and_updater.py)
+Follow the intructions on the latest [release](https://github.com/cloudyhair6/media-center-on-PC-with-no-screen-with-controller-on-android-tablet/releases/latest) or just download the latest [installer\_and\_updater.py](https://github.com/cloudyhair6/media-center-on-PC-with-no-screen-with-controller-on-android-tablet/releases/latest/download/installer_and_updater.py)
 
 ## Required:
 

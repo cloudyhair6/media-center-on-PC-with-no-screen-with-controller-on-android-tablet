@@ -40,7 +40,7 @@ def do_install_update(client_ip, latest_version):
     
     try:
         print(f"[TabletUpdater] Downloading APK for version {latest_version}...")
-        temp_apk = os.path.expandvars(r"%TEMP%\minipc_tablet_app.apk")
+        temp_apk = os.path.expandvars(r"%TEMP%\mediacentre_tablet_app.apk")
         
         result = subprocess.run(
             [sys.executable, str(updater_script), "--download-file", "tablet_apk/app.apk", "--tag", latest_version, "--out-file", temp_apk],

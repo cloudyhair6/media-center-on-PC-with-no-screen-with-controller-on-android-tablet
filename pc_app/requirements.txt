@@ -12,3 +12,4 @@ winrt-Windows.Media>=3.2.1
 mutagen>=1.46.0
 python-vlc>=3.0.0
 -r backend/lyrica/requirements.txt
+-r PyMusicIndexer/requirements.txt

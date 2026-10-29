@@ -540,7 +540,7 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 return
             elif action == "tablet_apk":
                 import os
-                temp_apk = os.path.expandvars(r"%TEMP%\minipc_tablet_app.apk")
+                temp_apk = os.path.expandvars(r"%TEMP%\mediacentre_tablet_app.apk")
                 if os.path.exists(temp_apk):
                     self.send_response(200)
                     self.send_header("Content-Type", "application/vnd.android.package-archive")
