@@ -7,11 +7,17 @@
             "pc_app/",
             "platform-tools/"
         ],
+        "Update Ignore Files": [
+            "pc_app/PyMusicIndexer/indexed_songs.json",
+            "pc_app/PyMusicIndexer/unindexed_files.json"
+        ],
         "Message": "Run the setup.bat file first, it will tell you what to do next!"
     },
     "Install Tablet APK": {
         "Files": [
             "tablet_apk/"
+        ],
+        "Update Ignore Files": [
         ],
         "Message": "Open the intall_apk.bat in the tablet_apk folder and follow the instructions."
     },
@@ -19,17 +25,23 @@
         "Files": [
             "tablet_apk/app.apk"
         ],
+        "Update Ignore Files": [
+        ],
         "Message": "Move the app.apk into the tablet and then open it to install the app."
     },
     "Unlock Tablet": {
         "Files": [
             "tablet_unlock/"
         ],
+        "Update Ignore Files": [
+        ],
         "Message": "Open the Unlock_Tablet.bat in the tablet_unlock folder and follow the instructions."
     },
     "Development with the APK": {
         "Files": [
             "development/"
+        ],
+        "Update Ignore Files": [
         ],
         "Message": "Go inside the Development folder and you should find the source code for the android 2.3.4 apk app."
     }

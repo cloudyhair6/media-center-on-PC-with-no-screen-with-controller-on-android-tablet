@@ -6,6 +6,7 @@ import urllib.request
 import urllib.error
 import urllib.parse
 import os
+from pathlib import Path
 import argparse
 import threading
 import shutil
@@ -24,30 +25,33 @@ def install_pyqt5_if_missing():
         import PyQt5
     except ImportError:
         print("PyQt5 is missing. Installing it now...")
-        import tkinter as tk
-        from tkinter import ttk
-        
-        root = tk.Tk()
-        root.title("Installing UI Components")
-        root.geometry("400x150")
-        root.resizable(False, False)
-        
-        root.eval('tk::PlaceWindow . center')
-        
-        lbl = tk.Label(root, text="Installing modern UI components (PyQt5)...\nPlease wait.", font=("Arial", 10))
-        lbl.pack(pady=20)
-        
-        progress = ttk.Progressbar(root, mode='indeterminate')
-        progress.pack(fill=tk.X, padx=20, pady=10)
-        progress.start(10)
-        
-        def run_install():
-            subprocess.run([sys.executable, "-m", "pip", "install", "PyQt5"], 
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            root.after(0, root.destroy)
+        try:
+            import tkinter as tk
+            from tkinter import ttk
             
-        threading.Thread(target=run_install, daemon=True).start()
-        root.mainloop()
+            root = tk.Tk()
+            root.title("Installing UI Components")
+            root.geometry("400x150")
+            root.resizable(False, False)
+            root.eval('tk::PlaceWindow . center')
+            
+            lbl = tk.Label(root, text="Installing modern UI components (PyQt5)...\nPlease wait.", font=("Arial", 10))
+            lbl.pack(pady=20)
+            
+            progress = ttk.Progressbar(root, mode='indeterminate')
+            progress.pack(fill=tk.X, padx=20, pady=10)
+            progress.start(10)
+            
+            def run_install():
+                subprocess.run([sys.executable, "-m", "pip", "install", "PyQt5"], 
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                root.after(0, root.destroy)
+                
+            threading.Thread(target=run_install, daemon=True).start()
+            root.mainloop()
+        except Exception:
+            # Fallback if tkinter is not available: install directly via pip
+            subprocess.run([sys.executable, "-m", "pip", "install", "PyQt5"])
 
 # Run the installer check before doing anything else
 install_pyqt5_if_missing()
@@ -259,25 +263,61 @@ def extract_files_from_option(option_data):
     elif isinstance(option_data, list):
         return option_data
     return []
+
+def extract_ignore_files_from_option(option_data):
+    if isinstance(option_data, dict):
+        for key in ("Update Ignore Files", "Update_Ignore_Files", "update_ignore_files", "Ignore Files", "ignore_files", "Update Ignore"):
+            val = option_data.get(key)
+            if isinstance(val, list):
+                return val
+            elif isinstance(val, str):
+                return [val]
+    return []
     
 def extract_message_from_option(option_data):
     if isinstance(option_data, dict):
         return option_data.get("Message", None)
     return None
 
+def is_path_or_child_protected(rel_path, protected_set):
+    norm_rel = Path(rel_path).as_posix().strip('/').lower()
+    for prot in protected_set:
+        norm_prot = Path(prot).as_posix().strip('/').lower()
+        if norm_rel == norm_prot or norm_prot.startswith(norm_rel + '/') or norm_rel.startswith(norm_prot + '/'):
+            return True
+    return False
+
+def is_file_protected(rel_path, protected_set):
+    norm_rel = Path(rel_path).as_posix().strip('/').lower()
+    for prot in protected_set:
+        norm_prot = Path(prot).as_posix().strip('/').lower()
+        if norm_rel == norm_prot or norm_rel.startswith(norm_prot + '/'):
+            return True
+    return False
+
 # --- Download Logic ---
-def resolve_files_to_download(paths, tree_objects):
+def resolve_files_to_download(paths, tree_objects, ignore_files=None):
+    ignore_set = set()
+    if ignore_files:
+        for ig in ignore_files:
+            ignore_set.add(Path(ig).as_posix().strip('/').lower())
+
     files = []
     for path in paths:
-        is_dir = path.endswith('/')
-        path_clean = path.rstrip('/')
+        # Normalize slashes for cross-platform compatibility
+        norm_path = Path(path).as_posix()
+        is_dir = path.endswith('/') or norm_path.endswith('/')
+        path_clean = norm_path.rstrip('/')
         
         for obj in tree_objects:
             if obj['type'] == 'blob':
-                if is_dir and obj['path'].startswith(path_clean + '/'):
-                    files.append(obj['path'])
-                elif not is_dir and obj['path'] == path_clean:
-                    files.append(obj['path'])
+                obj_path = Path(obj['path']).as_posix()
+                if is_dir and obj_path.startswith(path_clean + '/'):
+                    if not is_file_protected(obj_path, ignore_set):
+                        files.append(obj['path'])
+                elif not is_dir and obj_path == path_clean:
+                    if not is_file_protected(obj_path, ignore_set):
+                        files.append(obj['path'])
     return list(set(files))
 
 def perform_download_concurrently(files, tag, install_dir, progress_callback=None):
@@ -287,21 +327,24 @@ def perform_download_concurrently(files, tag, install_dir, progress_callback=Non
     lock = threading.Lock()
 
     def download_task(filepath):
-        local_path = os.path.join(install_dir, filepath.replace('/', os.sep))
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        
-        content = download_file_content(filepath, tag)
-        if content:
-            with open(local_path, "wb") as f:
-                f.write(content)
-        else:
-            print(f"Failed to download: {filepath}")
+        try:
+            local_path = os.path.join(install_dir, filepath.replace('/', os.sep))
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
             
-        nonlocal completed
-        with lock:
-            completed += 1
-            if progress_callback:
-                progress_callback(completed, total, filepath)
+            content = download_file_content(filepath, tag)
+            if content:
+                with open(local_path, "wb") as f:
+                    f.write(content)
+            else:
+                print(f"Failed to download: {filepath}")
+        except Exception as e:
+            print(f"Error saving {filepath}: {e}")
+        finally:
+            nonlocal completed
+            with lock:
+                completed += 1
+                if progress_callback:
+                    progress_callback(completed, total, filepath)
 
     # Use ThreadPoolExecutor to speed up downloads
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -409,61 +452,85 @@ def kill_parent_batch_script():
             cur = p_pid
 
         for pid in pids_to_kill:
-            try:
-                subprocess.run(["taskkill", "/F", "/PID", str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
+            if pid != os.getpid():
+                try:
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
     except Exception:
         try:
             parent_pid = os.getppid()
-            subprocess.run(["taskkill", "/F", "/PID", str(parent_pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if parent_pid != os.getpid():
+                subprocess.run(["taskkill", "/F", "/PID", str(parent_pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
-def robust_rmtree(path):
+def robust_rmtree(path, install_dir=None, protected_set=None):
+    if protected_set is None:
+        protected_set = set()
+        
     for root, dirs, files in os.walk(path, topdown=False):
         for name in files:
             file_path = os.path.join(root, name)
+            if install_dir:
+                rel_path = os.path.relpath(file_path, install_dir)
+                if is_file_protected(rel_path, protected_set):
+                    print(f"  -> Preserved ignored file: {rel_path}")
+                    continue
             try:
                 os.remove(file_path)
                 print(f"  -> Deleted: {file_path}")
             except Exception:
                 print(f"  -> Skipped locked/in-use item: {file_path}")
+                
         for name in dirs:
             dir_path = os.path.join(root, name)
+            if install_dir:
+                rel_dir = os.path.relpath(dir_path, install_dir)
+                if is_path_or_child_protected(rel_dir, protected_set):
+                    continue
             try:
                 os.rmdir(dir_path)
                 print(f"  -> Deleted directory: {dir_path}")
             except Exception:
                 pass
+                
+    if install_dir:
+        rel_top = os.path.relpath(path, install_dir)
+        if is_path_or_child_protected(rel_top, protected_set):
+            return
+            
     try:
         os.rmdir(path)
         print(f"  -> Deleted directory: {path}")
     except Exception:
         pass
 
-def clear_install_directory(install_dir, files_to_download=None, progress_callback=None):
+def clear_install_directory(install_dir, files_to_download=None, ignore_files=None, progress_callback=None):
     script_name = os.path.basename(os.path.abspath(__file__)).lower()
     config_name = CONFIG_FILE.lower()
     
     if not os.path.exists(install_dir):
         return
         
-    items_to_delete = []
-    # Protect these core files and folders from being deleted
-    protected_items = [config_name, ".git"]
+    protected_set = {config_name, ".git", "venv", ".venv"}
+    if ignore_files:
+        for ig in ignore_files:
+            protected_set.add(Path(ig).as_posix().strip('/').lower())
     
     # If this script is running directly from install_dir (e.g. GUI mode), protect it
     if os.path.abspath(os.path.dirname(__file__)).lower() == os.path.abspath(install_dir).lower():
-        protected_items.append(script_name)
+        protected_set.add(script_name)
     elif files_to_download:
         # Running from temp: only protect installer_and_updater.py if it is NOT in files_to_download
         download_basenames = [os.path.basename(f).lower() for f in files_to_download]
         if "installer_and_updater.py" not in download_basenames:
-            protected_items.append("installer_and_updater.py")
+            protected_set.add("installer_and_updater.py")
     
+    items_to_delete = []
     for item in os.listdir(install_dir):
-        if item.lower() in protected_items:
+        rel_item = item.lower()
+        if is_file_protected(rel_item, protected_set):
             continue
         items_to_delete.append(item)
         
@@ -471,14 +538,14 @@ def clear_install_directory(install_dir, files_to_download=None, progress_callba
     if total == 0:
         return
         
-    print(f"Found {total} items to delete.")
+    print(f"Found {total} items to process for cleanup.")
     for idx, item in enumerate(items_to_delete):
         item_path = os.path.join(install_dir, item)
-        print(f"Deleting top-level item: {item_path}")
+        print(f"Cleaning: {item_path}")
         
         try:
             if os.path.isdir(item_path):
-                robust_rmtree(item_path)
+                robust_rmtree(item_path, install_dir=install_dir, protected_set=protected_set)
             else:
                 os.remove(item_path)
                 print(f"  -> Deleted: {item_path}")
@@ -486,7 +553,7 @@ def clear_install_directory(install_dir, files_to_download=None, progress_callba
             print(f"  -> Skipped locked/in-use item: {item_path}")
             
         if progress_callback:
-            progress_callback(idx + 1, total, f"Deleted {item}")
+            progress_callback(idx + 1, total, f"Cleaned {item}")
 
 # --- Auto-Updater Routine ---
 def run_update_check(relaunch_script=None, test_mode=False, install_dir=None, is_temp_runner=False):
@@ -588,11 +655,13 @@ def run_update_check(relaunch_script=None, test_mode=False, install_dir=None, is
         return
         
     paths = []
+    ignore_files = []
     for opt in selected_options:
         paths.extend(extract_files_from_option(download_options[opt]))
+        ignore_files.extend(extract_ignore_files_from_option(download_options[opt]))
         
     tree = get_repo_tree(latest_version)
-    files_to_download = resolve_files_to_download(paths, tree)
+    files_to_download = resolve_files_to_download(paths, tree, ignore_files=ignore_files)
     
     class UpdateProgressWin(QWidget):
         def __init__(self):
@@ -629,9 +698,10 @@ def run_update_check(relaunch_script=None, test_mode=False, install_dir=None, is
         progress_update = pyqtSignal(int, int, str)
         finished_update = pyqtSignal()
         
-        def __init__(self, test_mode=False):
+        def __init__(self, test_mode=False, ignore_files=None):
             super().__init__()
             self.test_mode = test_mode
+            self.ignore_files = ignore_files or []
             
         def run(self):
             kill_other_python_processes()
@@ -639,7 +709,7 @@ def run_update_check(relaunch_script=None, test_mode=False, install_dir=None, is
             def del_progress(idx, total, fname):
                 self.progress_update.emit(idx, total, fname)
                 
-            clear_install_directory(install_dir, files_to_download, del_progress)
+            clear_install_directory(install_dir, files_to_download, ignore_files=self.ignore_files, progress_callback=del_progress)
             
             if self.test_mode:
                 input("\n[TEST MODE] Deletion complete. Verify the folder contents, then press Enter to continue downloading...\n")
@@ -658,7 +728,7 @@ def run_update_check(relaunch_script=None, test_mode=False, install_dir=None, is
             print("Update complete!")
             self.finished_update.emit()
             
-    worker = SilentUpdateWorker(test_mode)
+    worker = SilentUpdateWorker(test_mode, ignore_files=ignore_files)
     worker.progress_update.connect(update_win.update_progress)
     worker.finished_update.connect(update_win.close)
     worker.finished_update.connect(QApplication.instance().quit)
@@ -674,7 +744,7 @@ def run_update_check(relaunch_script=None, test_mode=False, install_dir=None, is
         for cdir in candidate_dirs:
             script_path = os.path.join(cdir, relaunch_script)
             if os.path.exists(script_path):
-                subprocess.Popen(["cmd.exe", "/c", relaunch_script], cwd=cdir, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                subprocess.Popen(["cmd.exe", "/c", script_path], cwd=cdir, creationflags=subprocess.CREATE_NEW_CONSOLE)
                 found = True
                 break
         if not found:
@@ -699,17 +769,18 @@ class DownloadWorker(QThread):
     finished_update = pyqtSignal()
     no_files_found = pyqtSignal()
     
-    def __init__(self, latest_version, paths, install_dir, test_mode=False):
+    def __init__(self, latest_version, paths, install_dir, test_mode=False, ignore_files=None):
         super().__init__()
         self.latest_version = latest_version
         self.paths = paths
         self.install_dir = install_dir
         self.test_mode = test_mode
+        self.ignore_files = ignore_files or []
         
     def run(self):
         self.progress_update.emit(0, 1, "Fetching tree...")
         tree = get_repo_tree(self.latest_version)
-        files = resolve_files_to_download(self.paths, tree)
+        files = resolve_files_to_download(self.paths, tree, ignore_files=self.ignore_files)
         
         if not files:
             self.no_files_found.emit()
@@ -720,7 +791,7 @@ class DownloadWorker(QThread):
         def del_progress(idx, total, fname):
             self.progress_update.emit(idx, total, fname)
             
-        clear_install_directory(self.install_dir, files, del_progress)
+        clear_install_directory(self.install_dir, files, ignore_files=self.ignore_files, progress_callback=del_progress)
             
         if self.test_mode:
             input("\n[TEST MODE] Deletion complete. Verify the folder contents, then press Enter to continue downloading...\n")
@@ -799,16 +870,20 @@ class UpdaterApp(QWidget):
     def is_directory_empty(self, directory):
         script_name = os.path.basename(os.path.abspath(__file__)).lower()
         config_name = CONFIG_FILE.lower()
+        ignored = [script_name, config_name, ".git", "venv", ".venv", "__pycache__"]
         print(f"[DEBUG] Checking directory: {directory}")
         for item in os.listdir(directory):
-            if item.lower() not in [script_name, config_name]:
+            if item.lower() not in ignored:
                 print(f"[DEBUG] Directory is NOT empty because of: {item}")
                 return False
         return True
 
     def start_download(self):
-        print("[DEBUG] Download button clicked. Checking if directory is empty...")
-        if not self.is_directory_empty(self.install_dir):
+        # Only require an empty folder if this is a first-time installation
+        existing_cfg = load_config(self.install_dir)
+        is_first_install = not existing_cfg.get('current_version')
+        
+        if is_first_install and not self.is_directory_empty(self.install_dir):
             print("[DEBUG] Showing error messagebox and opening folder.")
             QMessageBox.critical(self, "Folder Not Empty", "You need to place this in an empty folder.")
             try:
@@ -823,9 +898,11 @@ class UpdaterApp(QWidget):
             return
             
         paths = []
+        ignore_files = []
         self.messages = []
         for opt in selected:
             paths.extend(extract_files_from_option(self.download_options[opt]))
+            ignore_files.extend(extract_ignore_files_from_option(self.download_options[opt]))
             msg = extract_message_from_option(self.download_options[opt])
             if msg:
                 self.messages.append({"title": opt, "message": msg})
@@ -836,7 +913,7 @@ class UpdaterApp(QWidget):
         for cb in self.checkboxes.values():
             cb.setEnabled(False)
             
-        self.worker = DownloadWorker(self.latest_version, paths, self.install_dir, self.test_mode)
+        self.worker = DownloadWorker(self.latest_version, paths, self.install_dir, self.test_mode, ignore_files=ignore_files)
         self.worker.progress_update.connect(self.update_ui_progress)
         self.worker.no_files_found.connect(self.on_no_files)
         self.worker.finished_update.connect(self.on_finished)
@@ -853,11 +930,11 @@ class UpdaterApp(QWidget):
         self.reset_ui()
         
     def on_finished(self):
-        config = load_config()
+        config = load_config(self.install_dir)
         config['current_version'] = self.latest_version
         config['selected_options'] = self.selected_options
         config['install_dir'] = self.install_dir
-        save_config(config)
+        save_config(config, self.install_dir)
         
         QMessageBox.information(self, "Success", "Download and installation complete!")
         
