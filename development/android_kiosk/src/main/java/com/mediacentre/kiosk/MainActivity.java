@@ -103,7 +103,17 @@ public class MainActivity extends Activity {
     private TextView localFpSubtitle;
     private Button btnLocalReviewIncomplete;
     private Button btnLocalReviewUnindexed;
+    private LinearLayout localFpStatsContainer;
+    private TextView localFpStatsText;
+    private TextView localFpStatsSub;
     private LinearLayout localFpActionsContainer;
+    private LinearLayout localFpFilterContainer;
+    private Button btnLocalFilterAll;
+    private Button btnLocalFilterWorked;
+    private Button btnLocalFilterFailed;
+    private int currentReviewFilter = 0;
+    private JSONArray cachedReviewWorked = null;
+    private JSONArray cachedReviewFailed = null;
     private int currentReviewTab = 0;
     private Button btnLocalFpVlc;
     private Button btnLocalFpArt;
@@ -1444,7 +1454,30 @@ public class MainActivity extends Activity {
             localFpSubtitle = (TextView) findViewById(R.id.local_fp_subtitle);
             btnLocalReviewIncomplete = (Button) findViewById(R.id.btn_local_review_incomplete);
             btnLocalReviewUnindexed = (Button) findViewById(R.id.btn_local_review_unindexed);
+            localFpStatsContainer = (LinearLayout) findViewById(R.id.local_fp_stats_container);
+            localFpStatsText = (TextView) findViewById(R.id.local_fp_stats_text);
+            localFpStatsSub = (TextView) findViewById(R.id.local_fp_stats_sub);
             localFpActionsContainer = (LinearLayout) findViewById(R.id.local_fp_actions_container);
+            localFpFilterContainer = (LinearLayout) findViewById(R.id.local_fp_filter_container);
+            btnLocalFilterAll = (Button) findViewById(R.id.btn_local_filter_all);
+            btnLocalFilterWorked = (Button) findViewById(R.id.btn_local_filter_worked);
+            btnLocalFilterFailed = (Button) findViewById(R.id.btn_local_filter_failed);
+
+            if (btnLocalFilterAll != null) {
+                btnLocalFilterAll.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { switchReviewFilter(0); }
+                });
+            }
+            if (btnLocalFilterWorked != null) {
+                btnLocalFilterWorked.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { switchReviewFilter(1); }
+                });
+            }
+            if (btnLocalFilterFailed != null) {
+                btnLocalFilterFailed.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { switchReviewFilter(2); }
+                });
+            }
 
             if (btnLocalReviewIncomplete != null) {
                 btnLocalReviewIncomplete.setOnClickListener(new View.OnClickListener() {
@@ -3400,7 +3433,7 @@ public class MainActivity extends Activity {
             // Mutual Pause: Pause local playback when Spotify is triggered
             api.get("/api/indexer/pause", null);
             isLocalPlaying = false;
-            if (btnLocalNpPlayPause != null) btnLocalNpPlayPause.setText("▶");
+            if (btnLocalNpPlayPause != null) btnLocalNpPlayPause.setText("Play");
         }
         final boolean isTrackChange = endpoint.contains("spotify_next") ||
             endpoint.contains("spotify_prev") ||
@@ -3855,7 +3888,7 @@ public class MainActivity extends Activity {
                     for (int i = 0; i < currentLyrics.size(); i++) {
                         LyricLine ll = currentLyrics.get(i);
                         TextView tv = new TextView(MainActivity.this);
-                        tv.setText(ll.text.isEmpty() ? "♪" : ll.text);
+                        tv.setText(ll.text.isEmpty() ? "..." : ll.text);
                         tv.setTextColor(0xFF8892b0); // Dim
                         tv.setTextSize(22);
                         tv.setTypeface(null, Typeface.NORMAL);
@@ -4031,7 +4064,7 @@ public class MainActivity extends Activity {
                                     for (int i = 0; i < folders.length(); i++) {
                                         final String name = folders.getString(i);
                                         Button itemBtn = new Button(MainActivity.this);
-                                        itemBtn.setText(isDrives ? ("💾 " + name) : ("📁 " + name));
+                                        itemBtn.setText(isDrives ? ("[Drive] " + name) : ("[Folder] " + name));
                                         styleDynamicButton(itemBtn);
                                         itemBtn.setGravity(android.view.Gravity.LEFT | android.view.Gravity.CENTER_VERTICAL);
                                         itemBtn.setPadding(20, 15, 20, 15);
@@ -4226,18 +4259,20 @@ public class MainActivity extends Activity {
                                     total = prog.optInt("songs_indexed", total);
                                 }
                                 int inc = json.optInt("incomplete_count", 0);
+                                int unindexed = json.optInt("unindexed_count", 0);
 
                                 if (localIdxBar != null) localIdxBar.setProgress(pct);
                                 if (localIdxPercent != null) localIdxPercent.setText(pct + "%");
                                 if (localIdxFile != null) localIdxFile.setText(curr.isEmpty() ? "Indexing..." : "Scanning: " + curr);
-                                if (localIdxCount != null) localIdxCount.setText("Songs indexed: " + total);
+                                if (localIdxCount != null) {
+                                    localIdxCount.setText("Songs indexed: " + total + " | Needing FP: " + inc + " | Unindexed: " + unindexed);
+                                }
 
                                 if (isScanning) {
                                     handler.postDelayed(pollLocalIndexingRunnable, 1200);
                                 } else {
                                     isLocalIndexingPolling = false;
                                     showToast("Indexing complete! " + total + " songs indexed.", true);
-                                    int unindexed = json.optInt("unindexed_count", 0);
                                     if (inc > 0 || unindexed > 0) {
                                         showLocalScreen(3);
                                         if (inc > 0) {
@@ -4285,17 +4320,40 @@ public class MainActivity extends Activity {
         }
         if (localFpSubtitle != null) {
             localFpSubtitle.setText(tab == 0
-                ? "Found songs with incomplete metadata or missing album artwork."
+                ? "Review songs split into worked (enriched) and needing attention."
                 : "Files that could not be indexed (non-audio, unsupported format, or corrupt).");
+        }
+        if (localFpStatsContainer != null) {
+            localFpStatsContainer.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
         }
         if (localFpActionsContainer != null) {
             localFpActionsContainer.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
+        }
+        if (localFpFilterContainer != null) {
+            localFpFilterContainer.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
         }
         if (tab == 0) {
             loadIncompleteSongs();
         } else {
             loadUnindexedFiles(localFpItemsContainer, "");
         }
+    }
+
+    private void switchReviewFilter(int filter) {
+        currentReviewFilter = filter;
+        if (btnLocalFilterAll != null) {
+            btnLocalFilterAll.setTextColor(filter == 0 ? 0xFF00d4ff : 0xFF8892b0);
+            btnLocalFilterAll.setBackgroundColor(filter == 0 ? 0xFF1a1f36 : 0xFF111827);
+        }
+        if (btnLocalFilterWorked != null) {
+            btnLocalFilterWorked.setTextColor(filter == 1 ? 0xFF00ffaa : 0xFF8892b0);
+            btnLocalFilterWorked.setBackgroundColor(filter == 1 ? 0xFF102d20 : 0xFF111827);
+        }
+        if (btnLocalFilterFailed != null) {
+            btnLocalFilterFailed.setTextColor(filter == 2 ? 0xFFffa726 : 0xFF8892b0);
+            btnLocalFilterFailed.setBackgroundColor(filter == 2 ? 0xFF3a2810 : 0xFF111827);
+        }
+        renderReviewSplitList();
     }
 
     private void loadLocalUnindexed(String query) {
@@ -4407,7 +4465,7 @@ public class MainActivity extends Activity {
 
             boolean isCorrupt = reason.toLowerCase().contains("corrupt") || reason.toLowerCase().contains("failure") || (!errorDetails.isEmpty() && !"null".equals(errorDetails));
             TextView tvBadge = new TextView(this);
-            tvBadge.setText(isCorrupt ? "  ⚠️ CORRUPT  " : "  ℹ️ NON-AUDIO  ");
+            tvBadge.setText(isCorrupt ? "  [CORRUPT]  " : "  [NON-AUDIO]  ");
             tvBadge.setTextColor(isCorrupt ? 0xFFff5555 : 0xFF8892b0);
             tvBadge.setTextSize(11);
             tvBadge.setTypeface(null, Typeface.BOLD);
@@ -4467,8 +4525,37 @@ public class MainActivity extends Activity {
                     public void run() {
                         try {
                             JSONObject json = new JSONObject(response);
-                            JSONArray items = json.optJSONArray("incomplete");
-                            renderIncompleteSongs(items);
+                            cachedReviewWorked = json.optJSONArray("worked");
+                            cachedReviewFailed = json.optJSONArray("failed");
+                            if (cachedReviewFailed == null) {
+                                cachedReviewFailed = json.optJSONArray("incomplete");
+                            }
+
+                            int totalSongs = json.optInt("total_songs", 0);
+                            int needingFp = json.optInt("total_needing_fp", cachedReviewFailed != null ? cachedReviewFailed.length() : 0);
+                            int workedCount = json.optInt("total_worked", cachedReviewWorked != null ? cachedReviewWorked.length() : 0);
+                            int failedCount = json.optInt("total_failed", cachedReviewFailed != null ? cachedReviewFailed.length() : 0);
+                            int missingArt = json.optInt("total_missing_art", 0);
+                            int unindexedCount = json.optInt("total_unindexed", 0);
+
+                            if (localFpStatsText != null) {
+                                localFpStatsText.setText("Total Songs: " + totalSongs + " | Needing FP: " + needingFp + " | Worked: " + workedCount + " | Failed: " + failedCount);
+                            }
+                            if (localFpStatsSub != null) {
+                                localFpStatsSub.setText("Missing Artwork: " + missingArt + " | Unindexed Files: " + unindexedCount);
+                            }
+
+                            if (btnLocalFilterAll != null) {
+                                btnLocalFilterAll.setText("All Review (" + (workedCount + failedCount) + ")");
+                            }
+                            if (btnLocalFilterWorked != null) {
+                                btnLocalFilterWorked.setText("Worked (" + workedCount + ")");
+                            }
+                            if (btnLocalFilterFailed != null) {
+                                btnLocalFilterFailed.setText("Didn't Work (" + failedCount + ")");
+                            }
+
+                            renderReviewSplitList();
                         } catch (Exception e) {}
                     }
                 });
@@ -4478,10 +4565,17 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void renderIncompleteSongs(JSONArray items) {
+    private void renderReviewSplitList() {
         if (localFpItemsContainer == null) return;
         localFpItemsContainer.removeAllViews();
-        if (items == null || items.length() == 0) {
+
+        JSONArray worked = cachedReviewWorked;
+        JSONArray failed = cachedReviewFailed;
+
+        int workedLen = worked != null ? worked.length() : 0;
+        int failedLen = failed != null ? failed.length() : 0;
+
+        if (workedLen == 0 && failedLen == 0) {
             TextView none = new TextView(this);
             none.setText("No incomplete tracks found! All tracks have complete tags and artwork.");
             none.setTextColor(0xFF00ffaa);
@@ -4490,51 +4584,139 @@ public class MainActivity extends Activity {
             return;
         }
 
-        for (int i = 0; i < items.length(); i++) {
-            JSONObject s = items.optJSONObject(i);
-            if (s == null) continue;
-            LinearLayout card = new LinearLayout(this);
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackgroundColor(0xFF111827);
-            card.setPadding(12, 10, 12, 10);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.FILL_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.setMargins(0, 0, 0, 8);
-            card.setLayoutParams(lp);
+        // Section 1: Worked / Enriched
+        if (currentReviewFilter == 0 || currentReviewFilter == 1) {
+            if (workedLen > 0) {
+                TextView secWorked = new TextView(this);
+                secWorked.setText("--- WORKED / ENRICHED (" + workedLen + ") ---");
+                secWorked.setTextColor(0xFF00ffaa);
+                secWorked.setTextSize(13);
+                secWorked.setTypeface(null, Typeface.BOLD);
+                secWorked.setBackgroundColor(0xFF102d20);
+                secWorked.setPadding(12, 8, 12, 8);
+                localFpItemsContainer.addView(secWorked);
 
-            String title = s.optString("title", s.optString("file_name", "Untitled"));
-            String artist = s.optString("contributing_artists", s.optString("artist", "Unknown Artist"));
-            String album = s.optString("album", "");
-
-            TextView tvTitle = new TextView(this);
-            tvTitle.setText(title);
-            tvTitle.setTextColor(0xFFffffff);
-            tvTitle.setTextSize(14);
-            tvTitle.setTypeface(null, Typeface.BOLD);
-            card.addView(tvTitle);
-
-            TextView tvSub = new TextView(this);
-            tvSub.setText(artist + (album.isEmpty() ? "" : " • " + album));
-            tvSub.setTextColor(0xFF8892b0);
-            tvSub.setTextSize(12);
-            card.addView(tvSub);
-
-            JSONArray missing = s.optJSONArray("missing_fields_list");
-            if (missing != null && missing.length() > 0) {
-                StringBuilder sb = new StringBuilder("Missing: ");
-                for (int m = 0; m < missing.length(); m++) {
-                    if (m > 0) sb.append(", ");
-                    sb.append(missing.optString(m));
+                for (int i = 0; i < workedLen; i++) {
+                    JSONObject s = worked.optJSONObject(i);
+                    if (s == null) continue;
+                    renderReviewCard(s, true);
                 }
-                TextView tvMissing = new TextView(this);
-                tvMissing.setText(sb.toString());
-                tvMissing.setTextColor(0xFFffa726);
-                tvMissing.setTextSize(11);
-                card.addView(tvMissing);
+            } else if (currentReviewFilter == 1) {
+                TextView emptyW = new TextView(this);
+                emptyW.setText("No tracks have been enriched yet. Run VLC Fingerprint or Fetch Art.");
+                emptyW.setTextColor(0xFF8892b0);
+                emptyW.setPadding(15, 20, 15, 20);
+                localFpItemsContainer.addView(emptyW);
             }
-
-            localFpItemsContainer.addView(card);
         }
+
+        // Section 2: Didn't Work / Failed / Incomplete
+        if (currentReviewFilter == 0 || currentReviewFilter == 2) {
+            if (failedLen > 0) {
+                TextView secFailed = new TextView(this);
+                secFailed.setText("--- DID NOT WORK / STILL INCOMPLETE (" + failedLen + ") ---");
+                secFailed.setTextColor(0xFFffa726);
+                secFailed.setTextSize(13);
+                secFailed.setTypeface(null, Typeface.BOLD);
+                secFailed.setBackgroundColor(0xFF3a2810);
+                secFailed.setPadding(12, 8, 12, 8);
+                LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.FILL_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                if (currentReviewFilter == 0 && workedLen > 0) {
+                    slp.setMargins(0, 14, 0, 0);
+                }
+                secFailed.setLayoutParams(slp);
+                localFpItemsContainer.addView(secFailed);
+
+                for (int i = 0; i < failedLen; i++) {
+                    JSONObject s = failed.optJSONObject(i);
+                    if (s == null) continue;
+                    renderReviewCard(s, false);
+                }
+            } else if (currentReviewFilter == 2) {
+                TextView emptyF = new TextView(this);
+                emptyF.setText("Great news! There are no failed tracks.");
+                emptyF.setTextColor(0xFF00ffaa);
+                emptyF.setPadding(15, 20, 15, 20);
+                localFpItemsContainer.addView(emptyF);
+            }
+        }
+    }
+
+    private void renderReviewCard(JSONObject s, boolean isWorked) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundColor(0xFF111827);
+        card.setPadding(12, 10, 12, 10);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.FILL_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 0, 8);
+        card.setLayoutParams(lp);
+
+        String title = s.optString("title", s.optString("file_name", "Untitled"));
+        String artist = s.optString("artist", "Unknown Artist");
+        String album = s.optString("album", "");
+        String status = s.optString("status", "");
+
+        LinearLayout r1 = new LinearLayout(this);
+        r1.setOrientation(LinearLayout.HORIZONTAL);
+        r1.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        r1.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.FILL_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(title);
+        tvTitle.setTextColor(0xFFffffff);
+        tvTitle.setTextSize(14);
+        tvTitle.setTypeface(null, Typeface.BOLD);
+        tvTitle.setSingleLine(true);
+        tvTitle.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+        tvTitle.setLayoutParams(nlp);
+        r1.addView(tvTitle);
+
+        TextView tvBadge = new TextView(this);
+        tvBadge.setText(isWorked ? " [WORKED] " : " [NEEDS TAGS] ");
+        tvBadge.setTextColor(isWorked ? 0xFF00ffaa : 0xFFffa726);
+        tvBadge.setTextSize(11);
+        tvBadge.setTypeface(null, Typeface.BOLD);
+        tvBadge.setBackgroundColor(isWorked ? 0xFF102d20 : 0xFF3a2810);
+        tvBadge.setPadding(6, 3, 6, 3);
+        r1.addView(tvBadge);
+        card.addView(r1);
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText(artist + (album.isEmpty() ? "" : " - " + album));
+        tvSub.setTextColor(0xFF8892b0);
+        tvSub.setTextSize(12);
+        tvSub.setPadding(0, 2, 0, 0);
+        card.addView(tvSub);
+
+        if (!status.isEmpty()) {
+            TextView tvStatus = new TextView(this);
+            tvStatus.setText("Status: " + status);
+            tvStatus.setTextColor(isWorked ? 0xFF00d4ff : 0xFF8892b0);
+            tvStatus.setTextSize(11);
+            tvStatus.setPadding(0, 2, 0, 0);
+            card.addView(tvStatus);
+        }
+
+        JSONArray missing = s.optJSONArray("missing_fields_list");
+        if (missing != null && missing.length() > 0) {
+            StringBuilder sb = new StringBuilder("Missing: ");
+            for (int m = 0; m < missing.length(); m++) {
+                if (m > 0) sb.append(", ");
+                sb.append(missing.optString(m));
+            }
+            TextView tvMissing = new TextView(this);
+            tvMissing.setText(sb.toString());
+            tvMissing.setTextColor(0xFFffa726);
+            tvMissing.setTextSize(11);
+            tvMissing.setPadding(0, 2, 0, 0);
+            card.addView(tvMissing);
+        }
+
+        localFpItemsContainer.addView(card);
     }
 
     private boolean isLocalFpPolling = false;
@@ -4555,6 +4737,7 @@ public class MainActivity extends Activity {
                                 JSONObject prog = json.optJSONObject("fingerprint_progress");
                                 int pct = prog != null ? prog.optInt("progress_percent", 0) : 0;
                                 int enriched = prog != null ? prog.optInt("enriched_count", 0) : 0;
+                                int totalFiles = prog != null ? prog.optInt("total_files", 0) : 0;
 
                                 if (localFpProgressBar != null) {
                                     localFpProgressBar.setVisibility(isFp ? View.VISIBLE : View.GONE);
@@ -4562,7 +4745,8 @@ public class MainActivity extends Activity {
                                 }
                                 if (localFpStatus != null) {
                                     localFpStatus.setVisibility(View.VISIBLE);
-                                    localFpStatus.setText(currentFpActionLabel + ": " + pct + "% (" + enriched + " tracks enriched)");
+                                    String tot = totalFiles > 0 ? (" / " + totalFiles) : "";
+                                    localFpStatus.setText(currentFpActionLabel + ": " + pct + "% (Processed: " + enriched + tot + ")");
                                 }
 
                                 if (isFp) {
@@ -4713,7 +4897,7 @@ public class MainActivity extends Activity {
             filterBar.addView(tvFilter);
 
             Button btnClear = new Button(this);
-            btnClear.setText("✕ Show All");
+            btnClear.setText("Show All");
             btnClear.setTextColor(0xFFffffff);
             styleDynamicButton(btnClear);
             btnClear.setPadding(12, 6, 12, 6);
@@ -4788,7 +4972,7 @@ public class MainActivity extends Activity {
             row.addView(textCol);
 
             Button btnPlay = new Button(this);
-            btnPlay.setText("▶ Play");
+            btnPlay.setText("Play");
             btnPlay.setTextColor(0xFF00d4ff);
             btnPlay.setTextSize(12);
             styleDynamicButton(btnPlay);
@@ -4868,7 +5052,7 @@ public class MainActivity extends Activity {
             textCol.setLayoutParams(tlp);
 
             TextView tvName = new TextView(this);
-            tvName.setText("🎤 " + name);
+            tvName.setText(name);
             tvName.setTextColor(0xFFffffff);
             tvName.setTextSize(15);
             tvName.setTypeface(null, Typeface.BOLD);
@@ -4952,7 +5136,7 @@ public class MainActivity extends Activity {
             textCol.setLayoutParams(tlp);
 
             TextView tvName = new TextView(this);
-            tvName.setText("💿 " + albumName);
+            tvName.setText(albumName);
             tvName.setTextColor(0xFFffffff);
             tvName.setTextSize(15);
             tvName.setTypeface(null, Typeface.BOLD);
@@ -5002,7 +5186,7 @@ public class MainActivity extends Activity {
                         isLocalPlaying = true;
                         if (localNpTitle != null) localNpTitle.setText(title);
                         if (localNpArtist != null) localNpArtist.setText(artist);
-                        if (btnLocalNpPlayPause != null) btnLocalNpPlayPause.setText("❚❚");
+                        if (btnLocalNpPlayPause != null) btnLocalNpPlayPause.setText("Pause");
                         showToast("Playing: " + title, true);
                     }
                 });
@@ -5025,7 +5209,7 @@ public class MainActivity extends Activity {
             if (localNpArtist != null) localNpArtist.setText(artist);
         }
         if (btnLocalNpPlayPause != null) {
-            btnLocalNpPlayPause.setText(isLocalPlaying ? "❚❚" : "▶");
+            btnLocalNpPlayPause.setText(isLocalPlaying ? "Pause" : "Play");
         }
     }
 }

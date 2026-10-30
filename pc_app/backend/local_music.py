@@ -281,35 +281,75 @@ class LocalMusicManager:
 
     def get_incomplete_songs(self) -> List[Dict[str, Any]]:
         """Return songs with incomplete metadata or missing artwork."""
+        review = self.get_fingerprint_review()
+        return review.get("failed", [])
+
+    def get_fingerprint_review(self) -> Dict[str, Any]:
+        """Return categorized review data split into worked vs didn't work, plus detailed numbers."""
         all_songs = self.get_songs()
-        incomplete = []
+        worked_list = []
+        failed_list = []
+        missing_art_count = 0
+        missing_tags_count = 0
+
         for s in all_songs:
-            is_inc = s.get("has_incomplete_metadata", False)
             title = (s.get("title") or "").strip()
             artist = (s.get("artist") or s.get("contributing_artists") or "").strip()
             album = (s.get("album") or "").strip()
             has_art = bool(s.get("has_album_art") or s.get("album_art_web_url") or s.get("album_art_path"))
             
             missing_fields = []
-            if not title or title.lower() in ("unknown", "untitled"):
+            stem = os.path.splitext(s.get("file_name", ""))[0].lower()
+            if not title or title.lower() in ("unknown", "untitled", stem):
                 missing_fields.append("Title")
-            if not artist or artist.lower() in ("unknown", "unknown artist"):
+            if not artist or artist.lower() in ("unknown", "unknown artist", "various"):
                 missing_fields.append("Artist")
             if not album or album.lower() in ("unknown", "unknown album"):
                 missing_fields.append("Album")
             if not has_art:
                 missing_fields.append("Artwork")
 
-            if is_inc or missing_fields:
-                incomplete.append({
-                    "file_path": s.get("file_path", ""),
-                    "file_name": s.get("file_name", ""),
-                    "title": title or s.get("file_name", "Untitled"),
-                    "artist": artist or "Unknown Artist",
-                    "album": album or "",
-                    "missing_fields_list": missing_fields,
-                })
-        return incomplete
+            if not has_art:
+                missing_art_count += 1
+            if any(f in ("Title", "Artist", "Album") for f in missing_fields):
+                missing_tags_count += 1
+
+            vlc_status = (s.get("vlc_status") or "").strip()
+            vlc_fp = bool(s.get("vlc_fingerprinted", False))
+            
+            # Worked if VLC enriched it, or art/tags were resolved and complete
+            is_worked = (vlc_status == "VLC Enriched") or (vlc_fp and len(missing_fields) == 0) or bool(s.get("tags_saved", False))
+
+            entry = {
+                "file_path": s.get("file_path", ""),
+                "file_name": s.get("file_name", ""),
+                "title": title or s.get("file_name", "Untitled"),
+                "artist": artist or "Unknown Artist",
+                "album": album or "",
+                "status": vlc_status if vlc_status else ("Complete" if len(missing_fields) == 0 else "Needs Fingerprinting"),
+                "worked": is_worked,
+                "missing_fields_list": missing_fields,
+            }
+
+            if is_worked:
+                worked_list.append(entry)
+            elif len(missing_fields) > 0 or vlc_fp:
+                failed_list.append(entry)
+
+        unindexed = self.get_unindexed_files()
+
+        return {
+            "total_songs": len(all_songs),
+            "total_needing_fp": len(failed_list),
+            "total_worked": len(worked_list),
+            "total_failed": len(failed_list),
+            "total_missing_art": missing_art_count,
+            "total_missing_tags": missing_tags_count,
+            "total_unindexed": len(unindexed),
+            "worked": worked_list[:150],
+            "failed": failed_list[:150],
+            "incomplete": failed_list[:150],
+        }
 
     def get_unindexed_files(self) -> List[Dict[str, Any]]:
         """Return non-audio or failed/corrupt files from unindexed_files.json."""
@@ -341,6 +381,10 @@ class LocalMusicManager:
             live_indexed = self._scan_progress.get("songs_indexed", 0)
             return {
                 "total_songs": live_indexed,
+                "total_needing_fp": 0,
+                "total_worked": 0,
+                "total_failed": 0,
+                "total_missing_art": 0,
                 "unindexed_count": 0,
                 "incomplete_count": 0,
                 "configured_folders": self.get_configured_folders(),
@@ -352,26 +396,17 @@ class LocalMusicManager:
                 "player_status": self.get_player_status(),
             }
 
-        songs = self.get_songs()
-        unindexed_count = 0
-        if self.unindexed_json_path.exists():
-            try:
-                with open(self.unindexed_json_path, "r", encoding="utf-8") as f:
-                    u_data = json.load(f)
-                    if isinstance(u_data, list):
-                        unindexed_count = len(u_data)
-                    elif isinstance(u_data, dict) and "files" in u_data:
-                        unindexed_count = len(u_data.get("files", []))
-            except Exception:
-                pass
-
-        incomplete_count = len(self.get_incomplete_songs())
+        review = self.get_fingerprint_review()
         configured_folders = self.get_configured_folders()
 
         return {
-            "total_songs": len(songs),
-            "unindexed_count": unindexed_count,
-            "incomplete_count": incomplete_count,
+            "total_songs": review.get("total_songs", 0),
+            "total_needing_fp": review.get("total_needing_fp", 0),
+            "total_worked": review.get("total_worked", 0),
+            "total_failed": review.get("total_failed", 0),
+            "total_missing_art": review.get("total_missing_art", 0),
+            "unindexed_count": review.get("total_unindexed", 0),
+            "incomplete_count": review.get("total_needing_fp", 0),
             "configured_folders": configured_folders,
             "has_configured_folders": len(configured_folders) > 0,
             "is_scanning": self._is_scanning,
@@ -634,13 +669,21 @@ class LocalMusicManager:
                 self._fingerprint_progress["current_file"] = song.file_name
                 self._fingerprint_progress["progress_percent"] = int((idx / max(1, total)) * 100)
                 try:
-                    ok = AudioMetadataWriter.write_metadata(song)
+                    res = AudioMetadataWriter.write_metadata(song)
+                    ok = res[0] if isinstance(res, tuple) else bool(res)
                     if ok:
                         written += 1
                         self._fingerprint_progress["enriched_count"] = written
                 except Exception:
                     pass
 
+                try:
+                    from media_scanner.metadata import MetadataExtractor
+                    MetadataExtractor.evaluate_completeness(song)
+                except Exception:
+                    pass
+
+            StorageManager.update_songs_catalog(all_list, str(self.songs_json_path))
             self._fingerprint_progress["status"] = "completed"
             self._fingerprint_progress["progress_percent"] = 100
         except Exception as e:

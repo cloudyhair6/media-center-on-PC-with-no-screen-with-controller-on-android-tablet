@@ -715,9 +715,8 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                     self._json_response(200, {"artists": mgr.get_artists()})
                 elif action == "albums":
                     self._json_response(200, {"albums": mgr.get_albums()})
-                elif action == "incomplete":
-                    inc = mgr.get_incomplete_songs()
-                    self._json_response(200, {"incomplete": inc[:150], "total": len(inc)})
+                elif action in ("incomplete", "review"):
+                    self._json_response(200, mgr.get_fingerprint_review())
                 elif action == "unindexed":
                     un = mgr.get_unindexed_files()
                     self._json_response(200, {"unindexed": un[:150], "total": len(un)})
