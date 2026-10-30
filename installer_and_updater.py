@@ -126,10 +126,22 @@ def download_raw_url(url, extra_headers=None):
             with opener.open(req, timeout=15) as response:
                 if response.status == 200:
                     return response.read()
+        except ssl.SSLError as ssl_err:
+            print(f"[SSL Notice] Retrying {url} with unverified SSL...")
+            try:
+                unverified_ctx = ssl._create_unverified_context()
+                fallback_opener = urllib.request.build_opener(NoAuthRedirectHandler, urllib.request.HTTPSHandler(context=unverified_ctx))
+                with fallback_opener.open(req, timeout=15) as response:
+                    if response.status == 200:
+                        return response.read()
+            except Exception as e2:
+                print(f"[SSL Error] {e2}")
         except urllib.error.HTTPError as e:
             if e.code == 401 and use_auth:
                 # Token was unauthorized/revoked; fallback to anonymous request
                 continue
+            if e.code == 403:
+                print(f"[API Notice] HTTP 403 received for {url} (Rate limit reached or forbidden)")
             break
         except Exception:
             break
@@ -151,10 +163,78 @@ def get_latest_release_data():
             print(f"Error parsing latest release data: {e}")
     return None
 
+def get_latest_version_from_web():
+    url = f"https://github.com/{OWNER}/{REPO}/releases/latest"
+    opener = get_url_opener()
+    req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+    try:
+        with opener.open(req, timeout=15) as resp:
+            final_url = resp.geturl()
+            if "/releases/tag/" in final_url:
+                tag = final_url.split("/releases/tag/")[-1].split("?")[0].strip("/")
+                if tag:
+                    print(f"Detected latest release from web: {tag}")
+                    return urllib.parse.unquote(tag)
+    except Exception:
+        try:
+            unverified_ctx = ssl._create_unverified_context()
+            fallback_opener = urllib.request.build_opener(NoAuthRedirectHandler, urllib.request.HTTPSHandler(context=unverified_ctx))
+            with fallback_opener.open(req, timeout=15) as resp:
+                final_url = resp.geturl()
+                if "/releases/tag/" in final_url:
+                    tag = final_url.split("/releases/tag/")[-1].split("?")[0].strip("/")
+                    if tag:
+                        print(f"Detected latest release from web: {tag}")
+                        return urllib.parse.unquote(tag)
+        except Exception:
+            pass
+    return None
+
+def get_latest_version_from_atom():
+    url = f"https://github.com/{OWNER}/{REPO}/releases.atom"
+    content = download_raw_url(url)
+    if content:
+        try:
+            import re
+            m = re.search(r'/releases/tag/([^"\'/?#\s>]+)', content.decode('utf-8', errors='ignore'))
+            if m:
+                tag = urllib.parse.unquote(m.group(1))
+                print(f"Detected latest release from Atom feed: {tag}")
+                return tag
+        except Exception:
+            pass
+    return None
+
 def get_latest_release_version():
+    # Strategy 1: GitHub REST API
     data = get_latest_release_data()
-    if data:
-        return data.get('tag_name', None)
+    if data and data.get('tag_name'):
+        return data.get('tag_name')
+
+    # Strategy 2: GitHub web release redirect (bypasses GitHub API rate limit)
+    web_ver = get_latest_version_from_web()
+    if web_ver:
+        return web_ver
+
+    # Strategy 3: GitHub releases.atom feed (bypasses GitHub API rate limit)
+    atom_ver = get_latest_version_from_atom()
+    if atom_ver:
+        return atom_ver
+
+    # Strategy 4: GitHub API tags endpoint
+    tags_url = f"https://api.github.com/repos/{OWNER}/{REPO}/tags"
+    tags_content = download_raw_url(tags_url)
+    if tags_content:
+        try:
+            tags_list = json.loads(tags_content.decode('utf-8'))
+            if isinstance(tags_list, list) and len(tags_list) > 0:
+                tag = tags_list[0].get('name')
+                if tag:
+                    print(f"Detected latest tag from tags API: {tag}")
+                    return tag
+        except Exception:
+            pass
+
     return None
 
 def get_repo_tree(tag):
