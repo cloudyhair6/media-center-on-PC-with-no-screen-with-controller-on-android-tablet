@@ -129,7 +129,22 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                     version = cfg.get("current_version", version)
             except Exception:
                 pass
-            self._json_response(200, {"ok": True, "app": "Media Centre", "version": version})
+            resp_data = {"ok": True, "app": "Media Centre", "version": version}
+            try:
+                from urllib.parse import urlparse, parse_qs
+                qs = parse_qs(urlparse(self.path).query)
+                client_ver = qs.get("version", qs.get("client_version", [""]))[0].strip()
+                check_upd = qs.get("check_update", ["0"])[0].lower() in ("1", "true")
+                if client_ver and check_upd:
+                    from backend.tablet_updater import check_for_update
+                    upd_info = check_for_update(client_ver)
+                    if isinstance(upd_info, dict):
+                        resp_data.update(upd_info)
+                        if upd_info.get("latest_version"):
+                            resp_data["version"] = upd_info["latest_version"]
+            except Exception:
+                pass
+            self._json_response(200, resp_data)
             return
 
         # API: Spotify now playing

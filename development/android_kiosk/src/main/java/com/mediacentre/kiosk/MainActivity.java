@@ -2058,6 +2058,149 @@ public class MainActivity extends Activity {
         }.execute();
     }
 
+    private String getCurrentTabletVersion() {
+        String appVersion = "v1.8";
+        try {
+            appVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {}
+        return appVersion != null ? appVersion.trim() : "v1.8";
+    }
+
+    private int estimateVersionsBehind(String currentVer, String latestVer) {
+        try {
+            String c = currentVer != null ? currentVer.trim().replaceAll("^[vV]", "") : "";
+            String l = latestVer != null ? latestVer.trim().replaceAll("^[vV]", "") : "";
+            if (c.length() == 0 || l.length() == 0 || c.equalsIgnoreCase(l)) return 0;
+            String[] cParts = c.split("\\.");
+            String[] lParts = l.split("\\.");
+            if (cParts.length >= 2 && lParts.length >= 2) {
+                int cMaj = Integer.parseInt(cParts[0].replaceAll("[^0-9]", ""));
+                int lMaj = Integer.parseInt(lParts[0].replaceAll("[^0-9]", ""));
+                int cMin = Integer.parseInt(cParts[1].replaceAll("[^0-9]", ""));
+                int lMin = Integer.parseInt(lParts[1].replaceAll("[^0-9]", ""));
+                if (cMaj == lMaj && lMin > cMin) {
+                    return lMin - cMin;
+                }
+            }
+        } catch (Exception e) {}
+        return 1;
+    }
+
+    private void showTabletUpdateDialog(final String currentVer, final String latestVer, final int releasesBehind, final String commitsSummary) {
+        int count = releasesBehind > 0 ? releasesBehind : estimateVersionsBehind(currentVer, latestVer);
+        StringBuilder msg = new StringBuilder();
+        msg.append("An update is available for this tablet.\n");
+        msg.append("You are ").append(count).append(count == 1 ? " version" : " versions").append(" out of date.\n\n");
+        msg.append("Current Version on Tablet: ").append(currentVer).append("\n");
+        msg.append("Latest Version: ").append(latestVer).append("\n");
+        if (commitsSummary != null && commitsSummary.trim().length() > 0) {
+            msg.append("\nChanges between ").append(currentVer).append(" and ").append(latestVer).append(":\n");
+            msg.append("----------------------------------------\n");
+            msg.append(commitsSummary.trim()).append("\n");
+            msg.append("----------------------------------------\n");
+        }
+        msg.append("\nDo you want to update this tablet app now?");
+
+        new AlertDialog.Builder(MainActivity.this)
+            .setTitle("Update Available (" + currentVer + " -> " + latestVer + ")")
+            .setMessage(msg.toString())
+            .setPositiveButton("Update", new DialogInterface.OnClickListener() {
+                public void onClick(DialogInterface dialog, int which) {
+                    updateDialog = new ProgressDialog(MainActivity.this);
+                    updateDialog.setTitle("Updating Tablet");
+                    updateDialog.setMessage("Starting update to " + latestVer + "...");
+                    updateDialog.setCancelable(false);
+                    updateDialog.show();
+
+                    api.get("/api/system/tablet_update_install?version=" + android.net.Uri.encode(latestVer), new ApiClient.Callback() {
+                        @Override
+                        public void onSuccess(String response) {
+                            pollUpdateStatus();
+                        }
+                        @Override
+                        public void onError(final String error) {
+                            runOnUiThread(new Runnable() {
+                                public void run() {
+                                    if (updateDialog != null) { updateDialog.dismiss(); updateDialog = null; }
+                                    showToast("Failed to start update: " + error, false);
+                                }
+                            });
+                        }
+                    });
+                }
+            })
+            .setNegativeButton("Ignore", null)
+            .show();
+    }
+
+    private void checkForTabletUpdate(final String appVersion, final String fallbackServerVersion) {
+        api.get("/api/system/tablet_update_check?version=" + android.net.Uri.encode(appVersion), new ApiClient.Callback() {
+            @Override
+            public void onSuccess(String response) {
+                try {
+                    org.json.JSONObject upd = new org.json.JSONObject(response);
+                    boolean updateAvailable = upd.optBoolean("update_available", false);
+                    final String currentVer = upd.optString("current_version", appVersion);
+                    final String latestVer = upd.optString("latest_version", fallbackServerVersion);
+                    final int releasesBehind = upd.optInt("releases_behind", 0);
+
+                    StringBuilder commitsBuilder = new StringBuilder();
+                    String changelog = upd.optString("changelog", "").trim();
+                    if (changelog.length() > 0) {
+                        commitsBuilder.append(changelog);
+                    } else {
+                        org.json.JSONArray commitsArr = upd.optJSONArray("commits");
+                        if (commitsArr != null && commitsArr.length() > 0) {
+                            for (int i = 0; i < commitsArr.length(); i++) {
+                                String c = commitsArr.optString(i, "").trim();
+                                if (c.length() > 0) {
+                                    if (commitsBuilder.length() > 0) commitsBuilder.append("\n\n");
+                                    commitsBuilder.append("- ").append(c);
+                                }
+                            }
+                        }
+                    }
+                    final String commitsSummary = commitsBuilder.toString();
+
+                    if (updateAvailable || (!appVersion.equalsIgnoreCase(latestVer) && latestVer.length() > 0)) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                showTabletUpdateDialog(currentVer, latestVer, releasesBehind, commitsSummary);
+                            }
+                        });
+                    } else {
+                        showToast("Up-to-date (" + appVersion + ")", true);
+                    }
+                } catch (Exception e) {
+                    if (!appVersion.equalsIgnoreCase(fallbackServerVersion)) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                showTabletUpdateDialog(appVersion, fallbackServerVersion, 0, "");
+                            }
+                        });
+                    } else {
+                        showToast("Up-to-date", true);
+                    }
+                }
+            }
+            @Override
+            public void onError(String error) {
+                if (fallbackServerVersion != null && fallbackServerVersion.length() > 0 && !appVersion.equalsIgnoreCase(fallbackServerVersion)) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            showTabletUpdateDialog(appVersion, fallbackServerVersion, 0, "");
+                        }
+                    });
+                } else {
+                    showToast("Connected", true);
+                }
+            }
+        });
+    }
+
     private void connectToIp(String ip) {
         currentIp = ip;
         prefs.edit().putString("last_ip", ip).commit();
@@ -2065,6 +2208,7 @@ public class MainActivity extends Activity {
         
         updateConnectionStatus(STATUS_CONNECTING);
         final int loadId = startLoading("Connecting to " + ip + "...");
+        final String appVersion = getCurrentTabletVersion();
         api.get("/api/status", new ApiClient.Callback() {
             @Override
             public void onSuccess(String response) {
@@ -2072,48 +2216,8 @@ public class MainActivity extends Activity {
                 onConnectionSuccess();
                 try {
                     org.json.JSONObject json = new org.json.JSONObject(response);
-                    
-                    String appVersion = "v1.8";
-                    try {
-                        appVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-                    } catch (Exception e) {}
-
                     String serverVersion = json.optString("version", appVersion);
-                    final String targetVersion = serverVersion;
-                    if (!appVersion.equals(serverVersion)) {
-                        new AlertDialog.Builder(MainActivity.this)
-                            .setTitle("Update Available")
-                            .setMessage("An update is available (Version " + serverVersion + ").\nDo you want to update this tablet app now?\n\n(Current version: " + appVersion + ")")
-                            .setPositiveButton("Update", new DialogInterface.OnClickListener() {
-                                public void onClick(DialogInterface dialog, int which) {
-                                    updateDialog = new ProgressDialog(MainActivity.this);
-                                    updateDialog.setTitle("Updating Tablet");
-                                    updateDialog.setMessage("Starting update...");
-                                    updateDialog.setCancelable(false);
-                                    updateDialog.show();
-                                    
-                                    api.get("/api/system/tablet_update_install?version=" + targetVersion, new ApiClient.Callback() {
-                                        @Override
-                                        public void onSuccess(String response) {
-                                            pollUpdateStatus();
-                                        }
-                                        @Override
-                                        public void onError(final String error) {
-                                            runOnUiThread(new Runnable() {
-                                                public void run() {
-                                                    if (updateDialog != null) { updateDialog.dismiss(); updateDialog = null; }
-                                                    showToast("Failed to start update: " + error, false);
-                                                }
-                                            });
-                                        }
-                                    });
-                                }
-                            })
-                            .setNegativeButton("Ignore", null)
-                            .show();
-                    } else {
-                        showToast("Up-to-date", true);
-                    }
+                    checkForTabletUpdate(appVersion, serverVersion);
                 } catch (Exception e) {
                     showToast("Connected", true);
                 }
