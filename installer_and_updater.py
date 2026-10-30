@@ -90,13 +90,18 @@ def _get_default_token():
     except Exception:
         return ""
 
+def get_auth_token():
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not token:
+        token = _get_default_token()
+    return token
+
 def get_auth_headers(allow_token=True):
     headers = {'User-Agent': USER_AGENT}
-    token = os.environ.get("GITHUB_TOKEN", "") if allow_token else ""
-    if not token and allow_token:
-        token = _get_default_token()
-    if token:
-        headers['Authorization'] = f"token {token}"
+    if allow_token:
+        token = get_auth_token()
+        if token:
+            headers['Authorization'] = f"token {token}"
     return headers
 
 class NoAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -120,9 +125,8 @@ def get_url_opener():
 
 def download_raw_url(url, extra_headers=None):
     opener = get_url_opener()
-    # Try with auth token first only if GITHUB_TOKEN is explicitly set, otherwise use public anonymous access
-    has_env_token = bool(os.environ.get("GITHUB_TOKEN"))
-    attempts = [True, False] if has_env_token else [False]
+    has_token = bool(get_auth_token())
+    attempts = [True, False] if has_token else [False]
     
     for use_auth in attempts:
         req_headers = get_auth_headers(allow_token=use_auth)
