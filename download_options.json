@@ -3,7 +3,7 @@
         "Files": [
             "setup.bat",
             "start.bat",
-            "installer_and_updater.py"
+            "installer_and_updater.py",
             "pc_app/",
             "platform-tools/"
         ],

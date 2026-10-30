@@ -1,6 +1,7 @@
 import sys
 import subprocess
 import json
+import base64
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -77,64 +78,179 @@ def save_config(config, target_dir=None):
         json.dump(config, f, indent=4)
 
 # --- GitHub API Helpers ---
-def get_auth_headers():
+def get_auth_headers(allow_token=True):
     headers = {'User-Agent': USER_AGENT}
-    token = os.environ.get("GITHUB_TOKEN", "")
+    token = os.environ.get("GITHUB_TOKEN", "") if allow_token else ""
     if token:
         headers['Authorization'] = f"token {token}"
     return headers
 
-def get_latest_release_version():
+class NoAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_req:
+            # Strip Authorization header on redirect (e.g. when redirected to AWS S3/CDN)
+            # AWS S3 rejects requests if both Authorization header and query signatures are present
+            new_req.headers = {k: v for k, v in new_req.headers.items() if k.lower() != 'authorization'}
+        return new_req
+
+_url_opener = None
+def get_url_opener():
+    global _url_opener
+    if _url_opener is None:
+        handlers = [NoAuthRedirectHandler]
+        if ssl_context:
+            handlers.append(urllib.request.HTTPSHandler(context=ssl_context))
+        _url_opener = urllib.request.build_opener(*handlers)
+    return _url_opener
+
+def download_raw_url(url, extra_headers=None):
+    opener = get_url_opener()
+    # Try with auth token first only if GITHUB_TOKEN is explicitly set, otherwise use public anonymous access
+    has_env_token = bool(os.environ.get("GITHUB_TOKEN"))
+    attempts = [True, False] if has_env_token else [False]
+    
+    for use_auth in attempts:
+        req_headers = get_auth_headers(allow_token=use_auth)
+        if extra_headers:
+            req_headers.update(extra_headers)
+        if not use_auth and 'Authorization' in req_headers:
+            del req_headers['Authorization']
+            
+        req = urllib.request.Request(url, headers=req_headers)
+        try:
+            with opener.open(req, timeout=15) as response:
+                if response.status == 200:
+                    return response.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and use_auth:
+                # Token was unauthorized/revoked; fallback to anonymous request
+                continue
+            break
+        except Exception:
+            break
+    return None
+
+LATEST_RELEASE_DATA = None
+
+def get_latest_release_data():
+    global LATEST_RELEASE_DATA
+    if LATEST_RELEASE_DATA:
+        return LATEST_RELEASE_DATA
     url = f"https://api.github.com/repos/{OWNER}/{REPO}/releases/latest"
-    req = urllib.request.Request(url, headers=get_auth_headers())
-    try:
-        with urllib.request.urlopen(req, context=ssl_context) as response:
-            if response.status == 200:
-                data = json.loads(response.read().decode('utf-8'))
-                return data.get('tag_name', None)
-    except urllib.error.HTTPError as e:
-        if e.code == 403:
-            raise Exception("GitHub API Rate Limit Exceeded (403).\nYou have made too many requests. Please wait a while before trying again, or set the GITHUB_TOKEN environment variable.")
-        print(f"Error fetching latest release: {e}")
-    except Exception as e:
-        print(f"Error fetching latest release: {e}")
+    content = download_raw_url(url)
+    if content:
+        try:
+            LATEST_RELEASE_DATA = json.loads(content.decode('utf-8'))
+            return LATEST_RELEASE_DATA
+        except Exception as e:
+            print(f"Error parsing latest release data: {e}")
+    return None
+
+def get_latest_release_version():
+    data = get_latest_release_data()
+    if data:
+        return data.get('tag_name', None)
     return None
 
 def get_repo_tree(tag):
     url = f"https://api.github.com/repos/{OWNER}/{REPO}/git/trees/{tag}?recursive=1"
-    req = urllib.request.Request(url, headers=get_auth_headers())
-    try:
-        with urllib.request.urlopen(req, context=ssl_context) as response:
-            if response.status == 200:
-                data = json.loads(response.read().decode('utf-8'))
-                return data.get('tree', [])
-    except Exception as e:
-        print(f"Error fetching tree: {e}")
+    content = download_raw_url(url)
+    if content:
+        try:
+            data = json.loads(content.decode('utf-8'))
+            return data.get('tree', [])
+        except Exception as e:
+            print(f"Error fetching tree: {e}")
     return []
 
 def download_file_content(path, tag):
-    url = f"https://raw.githubusercontent.com/{OWNER}/{REPO}/{tag}/{urllib.parse.quote(path)}"
-    req = urllib.request.Request(url, headers=get_auth_headers())
-    try:
-        with urllib.request.urlopen(req, context=ssl_context) as response:
-            if response.status == 200:
-                return response.read()
-    except urllib.error.HTTPError as e:
-        if e.code == 403:
-            print(f"GitHub API Rate Limit Exceeded when downloading {path}.")
-        else:
-            print(f"Error downloading {path}: {e}")
-    except Exception as e:
-        print(f"Error downloading {path}: {e}")
+    # Strategy 1: GitHub API contents endpoint with raw Accept header
+    for ref in (tag, tag.lstrip('v') if tag.startswith('v') else f"v{tag}", "main"):
+        api_url = f"https://api.github.com/repos/{OWNER}/{REPO}/contents/{urllib.parse.quote(path)}?ref={ref}"
+        content = download_raw_url(api_url, extra_headers={'Accept': 'application/vnd.github.v3.raw'})
+        if content:
+            return content
+
+        # Strategy 2: GitHub API contents endpoint with base64 decoding
+        meta_json = download_raw_url(api_url)
+        if meta_json:
+            try:
+                data = json.loads(meta_json.decode('utf-8'))
+                if 'content' in data and data.get('encoding') == 'base64':
+                    return base64.b64decode(data['content'])
+            except Exception:
+                pass
+
+    # Strategy 3: raw.githubusercontent.com
+    for ref in (tag, tag.lstrip('v') if tag.startswith('v') else f"v{tag}"):
+        url = f"https://raw.githubusercontent.com/{OWNER}/{REPO}/{ref}/{urllib.parse.quote(path)}"
+        content = download_raw_url(url)
+        if content:
+            return content
+
+    # Strategy 4: github.com raw view
+    for ref in (tag, tag.lstrip('v') if tag.startswith('v') else f"v{tag}"):
+        url = f"https://github.com/{OWNER}/{REPO}/raw/{ref}/{urllib.parse.quote(path)}"
+        content = download_raw_url(url)
+        if content:
+            return content
+
+    # Strategy 5: Release asset direct download if applicable
+    fname = os.path.basename(path)
+    asset_url = f"https://github.com/{OWNER}/{REPO}/releases/download/{tag}/{urllib.parse.quote(fname)}"
+    content = download_raw_url(asset_url)
+    if content:
+        return content
     return None
 
 def fetch_download_options(tag):
-    content = download_file_content("download_options.json", tag)
-    if content:
-        try:
-            return json.loads(content.decode('utf-8'))
-        except json.JSONDecodeError:
-            pass
+    print(f"Fetching download_options.json for tag {tag}...")
+    
+    # Strategy 1: GitHub REST API contents endpoint (direct git tree lookup at tag)
+    for ref in (tag, tag.lstrip('v') if tag.startswith('v') else f"v{tag}", "main"):
+        for path in ("download_options.json", "updater/download_options.json"):
+            api_url = f"https://api.github.com/repos/{OWNER}/{REPO}/contents/{path}?ref={ref}"
+            content = download_raw_url(api_url, extra_headers={'Accept': 'application/vnd.github.v3.raw'})
+            if content:
+                try:
+                    return json.loads(content.decode('utf-8'))
+                except Exception as e:
+                    print(f"Warning: JSON parse error for {path} at {ref}: {e}")
+
+            meta_raw = download_raw_url(api_url)
+            if meta_raw:
+                try:
+                    data = json.loads(meta_raw.decode('utf-8'))
+                    if 'content' in data and data.get('encoding') == 'base64':
+                        decoded = base64.b64decode(data['content'])
+                        return json.loads(decoded.decode('utf-8'))
+                except Exception:
+                    pass
+
+    # Strategy 2: Check raw.githubusercontent.com and github.com/raw
+    for path in ("download_options.json", "updater/download_options.json"):
+        content = download_file_content(path, tag)
+        if content:
+            try:
+                return json.loads(content.decode('utf-8'))
+            except Exception as e:
+                print(f"Warning: Failed to parse {path}: {e}")
+
+    # Strategy 3: Check if download_options.json is attached as a Release Asset in the release
+    release_data = get_latest_release_data()
+    if release_data:
+        for asset in release_data.get('assets', []):
+            if asset.get('name', '').lower() == 'download_options.json':
+                browser_url = asset.get('browser_download_url')
+                if browser_url:
+                    content = download_raw_url(browser_url)
+                    if content:
+                        try:
+                            return json.loads(content.decode('utf-8'))
+                        except Exception:
+                            pass
+
     return None
 
 def extract_files_from_option(option_data):
