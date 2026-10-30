@@ -45,6 +45,8 @@ class SpotifyControl:
     _last_artwork_url = ""
     _last_context_uri = ""
     _last_context_desc = ""
+    _cached_user_id = ""
+    _cached_liked_playlist_uri = ""
     _last_seek_time = 0.0
     _last_seek_pos_ms = 0
     _last_seek_is_active = False
@@ -191,8 +193,57 @@ class SpotifyControl:
         SpotifyControl._run_cli(args)
 
     @staticmethod
+    def get_user_id() -> str:
+        """Fetch and cache the current Spotify user ID via `spotify_cli me`."""
+        if SpotifyControl._cached_user_id:
+            return SpotifyControl._cached_user_id
+
+        import re
+        for args in (["me", "--format", "json"], ["me"]):
+            output = SpotifyControl._run_cli(args)
+            if not output:
+                continue
+            m_uri = re.search(r"spotify:user:([^\s\"',\}]+)", output)
+            if m_uri:
+                SpotifyControl._cached_user_id = m_uri.group(1).strip()
+                return SpotifyControl._cached_user_id
+            try:
+                data = json.loads(output)
+                if isinstance(data, dict):
+                    for key in ("username", "id", "user_id", "uri"):
+                        val = data.get(key) or (data.get("user", {}) if isinstance(data.get("user"), dict) else {}).get(key)
+                        if isinstance(val, str) and val.strip():
+                            val = val.strip()
+                            if val.startswith("spotify:user:"):
+                                val = val.split("spotify:user:", 1)[1]
+                            SpotifyControl._cached_user_id = val
+                            return SpotifyControl._cached_user_id
+            except Exception:
+                pass
+            for line in output.splitlines():
+                m_kv = re.match(r"^\s*(?:username|user\s*id|id)\s*[:=]\s*([^\s]+)", line, flags=re.IGNORECASE)
+                if m_kv:
+                    SpotifyControl._cached_user_id = m_kv.group(1).strip()
+                    return SpotifyControl._cached_user_id
+
+        return ""
+
+    @staticmethod
     def play_uri(uri: str) -> None:
-        SpotifyControl._run_cli(["play", uri])
+        target_uri = (uri or "").strip()
+        if target_uri in ("spotify:collection:tracks", "spotify:collection", "liked"):
+            user_id = SpotifyControl.get_user_id()
+            if user_id:
+                target_uri = f"spotify:user:{user_id}:collection"
+
+        out = SpotifyControl._run_cli(["play", target_uri])
+        if ("failed to play" in out.lower() or "error" in out.lower()):
+            if target_uri.endswith(":collection"):
+                liked_pl = SpotifyControl.get_liked_playlist_uri()
+                if liked_pl and liked_pl != target_uri:
+                    out = SpotifyControl._run_cli(["play", liked_pl])
+            if ("failed to play" in out.lower() or "error" in out.lower()) and target_uri != uri:
+                SpotifyControl._run_cli(["play", uri])
         
         # Give CLI a split second to send the play command
         import time
@@ -222,6 +273,162 @@ class SpotifyControl:
         """Add a URI to the saved library."""
         output = SpotifyControl._run_cli(["library", "add", uri])
         return "Added" in output
+
+    @staticmethod
+    @staticmethod
+    def _resolve_collection_uri(uri: str) -> str:
+        u = (uri or "").strip()
+        if u in ("spotify:collection:tracks", "spotify:collection", "liked"):
+            user_id = SpotifyControl.get_user_id()
+            if user_id:
+                return f"spotify:user:{user_id}:collection"
+        return u
+
+    @staticmethod
+    def get_liked_playlist_uri() -> str:
+        """Resolve the internal spotify:playlist:... URI for Liked Songs via `playlist get`."""
+        if SpotifyControl._cached_liked_playlist_uri:
+            return SpotifyControl._cached_liked_playlist_uri
+        coll_uri = SpotifyControl._resolve_collection_uri("spotify:collection:tracks")
+        out = SpotifyControl._run_cli(["playlist", "get", coll_uri, "--no-tracks", "--format", "json"])
+        if out:
+            try:
+                data = json.loads(out)
+                resolved = (data.get("uri") or "").strip()
+                if resolved.startswith("spotify:playlist:"):
+                    SpotifyControl._cached_liked_playlist_uri = resolved
+                    return resolved
+            except Exception:
+                pass
+        return coll_uri
+
+    @staticmethod
+    def get_playlist_details(playlist_uri: str, limit: int = 50, offset: int = 0) -> dict:
+        """Get playlist metadata and paginated tracks via `spotify_cli playlist get`."""
+        target_uri = SpotifyControl._resolve_collection_uri(playlist_uri)
+        output = SpotifyControl._run_cli([
+            "playlist", "get", target_uri,
+            "--limit", str(max(1, min(limit, 100))),
+            "--offset", str(max(0, offset)),
+            "--format", "json"
+        ])
+        if not output:
+            return {"error": "No response from spotify_cli"}
+        try:
+            data = json.loads(output)
+            if not isinstance(data, dict):
+                return {"error": "Invalid playlist data"}
+            resolved_uri = (data.get("uri") or "").strip()
+            if target_uri.endswith(":collection") and resolved_uri.startswith("spotify:playlist:"):
+                SpotifyControl._cached_liked_playlist_uri = resolved_uri
+
+            raw_tracks = data.get("tracks", []) or []
+            tracks = []
+            for idx, t in enumerate(raw_tracks):
+                if not isinstance(t, dict):
+                    continue
+                artists = t.get("artists", [])
+                if isinstance(artists, list):
+                    artist_str = ", ".join(str(a) for a in artists if a)
+                else:
+                    artist_str = str(artists or "")
+                tracks.append({
+                    "uri": t.get("uri", ""),
+                    "name": t.get("name", "Unknown"),
+                    "artist": artist_str,
+                    "album": t.get("album", ""),
+                    "position": t.get("position", offset + idx),
+                })
+
+            return {
+                "uri": playlist_uri,
+                "resolved_uri": resolved_uri or target_uri,
+                "name": data.get("name", "Playlist"),
+                "description": data.get("description", ""),
+                "owner": data.get("owner", ""),
+                "is_owned": bool(data.get("is_owned", False)),
+                "track_count": int(data.get("track_count", len(tracks))),
+                "offset": offset,
+                "limit": limit,
+                "tracks": tracks,
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    @staticmethod
+    def play_track_in_playlist(playlist_uri: str, track_uri: str, position: int = -1) -> bool:
+        """Play a specific song from a playlist while also playing/continuing the playlist."""
+        if not track_uri:
+            if playlist_uri:
+                SpotifyControl.play_uri(playlist_uri)
+                return True
+            return False
+
+        SpotifyControl._last_context_uri = playlist_uri
+        is_shuffle = bool(SpotifyControl._last_metadata.get("shuffle", False))
+
+        if playlist_uri:
+            SpotifyControl.play_uri(playlist_uri)
+            time.sleep(0.35)
+
+            if position == 0 and not is_shuffle:
+                np_out = SpotifyControl._run_cli(["now-playing", "--format", "json"])
+                if track_uri in (np_out or ""):
+                    return True
+
+            q_out = SpotifyControl._run_cli(["queue", "add", track_uri])
+            if "Added" in (q_out or "") or "error" not in (q_out or "").lower():
+                time.sleep(0.15)
+                SpotifyControl._run_cli(["next"])
+            else:
+                SpotifyControl._run_cli(["play", track_uri])
+
+            if not is_shuffle and position >= 0:
+                import threading
+                def _queue_following():
+                    try:
+                        details = SpotifyControl.get_playlist_details(playlist_uri, limit=15, offset=position + 1)
+                        for tr in details.get("tracks", [])[:15]:
+                            t_u = tr.get("uri", "")
+                            if t_u:
+                                SpotifyControl._run_cli(["queue", "add", t_u])
+                    except Exception:
+                        pass
+                threading.Thread(target=_queue_following, daemon=True).start()
+            return True
+        else:
+            SpotifyControl.play_uri(track_uri)
+            return True
+
+    @staticmethod
+    def playlist_create(name: str, description: str = "", public: bool = False) -> dict:
+        """Create a new playlist via `spotify_cli playlist create`."""
+        if not name or not name.strip():
+            return {"ok": False, "error": "Missing playlist name"}
+        args = ["playlist", "create", name.strip()]
+        if description and description.strip():
+            args.extend(["--description", description.strip()])
+        if public:
+            args.append("--public")
+        args.extend(["--format", "json"])
+        out = SpotifyControl._run_cli(args)
+        if not out:
+            return {"ok": False, "error": "Failed to create playlist"}
+        try:
+            data = json.loads(out)
+            if isinstance(data, dict):
+                data["ok"] = True
+                return data
+        except Exception:
+            pass
+        return {"ok": "error" not in out.lower(), "message": out}
+
+    @staticmethod
+    def playlist_remove(playlist_uri: str, positions: str) -> bool:
+        """Remove track(s) at specified position(s) from a playlist."""
+        target_pl = SpotifyControl._resolve_collection_uri(playlist_uri)
+        output = SpotifyControl._run_cli(["playlist", "remove", target_pl, "--positions", str(positions)])
+        return "error" not in (output or "").lower() and "failed" not in (output or "").lower()
 
     @staticmethod
     def playlist_add(playlist_uri: str, track_uri: str) -> bool:

@@ -9,7 +9,8 @@
         ],
         "Update Ignore Files": [
             "pc_app/PyMusicIndexer/indexed_songs.json",
-            "pc_app/PyMusicIndexer/unindexed_files.json"
+            "pc_app/PyMusicIndexer/unindexed_files.json",
+            "pc_app/album_art_cache/"
         ],
         "Message": "Run the setup.bat file first, it will tell you what to do next!"
     },

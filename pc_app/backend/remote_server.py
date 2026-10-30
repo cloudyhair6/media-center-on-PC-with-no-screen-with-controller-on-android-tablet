@@ -326,6 +326,39 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                     track_uri = parsed.get("track_uri", [""])[0]
                     res = SpotifyControl.playlist_add(playlist_uri, track_uri)
                     self._json_response(200, {"ok": res})
+                elif action == "get":
+                    playlist_uri = parsed.get("uri", parsed.get("playlist_uri", [""]))[0]
+                    limit = int(parsed.get("limit", ["50"])[0])
+                    offset = int(parsed.get("offset", ["0"])[0])
+                    res = SpotifyControl.get_playlist_details(playlist_uri, limit=limit, offset=offset)
+                    self._json_response(200, res)
+                elif action == "play_track":
+                    try:
+                        from backend.local_music import LocalMusicManager
+                        LocalMusicManager.get_instance().pause()
+                    except Exception:
+                        pass
+                    playlist_uri = parsed.get("playlist_uri", [""])[0]
+                    track_uri = parsed.get("track_uri", [""])[0]
+                    try:
+                        pos = int(parsed.get("position", ["-1"])[0])
+                    except Exception:
+                        pos = -1
+                    res = SpotifyControl.play_track_in_playlist(playlist_uri, track_uri, position=pos)
+                    self._json_response(200, {"ok": res})
+                elif action == "create":
+                    name = parsed.get("name", [""])[0]
+                    description = parsed.get("description", [""])[0]
+                    public = parsed.get("public", ["false"])[0].lower() in ("true", "1")
+                    res = SpotifyControl.playlist_create(name, description=description, public=public)
+                    self._json_response(200, res)
+                elif action == "remove":
+                    playlist_uri = parsed.get("playlist_uri", [""])[0]
+                    positions = parsed.get("positions", parsed.get("position", [""]))[0]
+                    res = SpotifyControl.playlist_remove(playlist_uri, positions)
+                    self._json_response(200, {"ok": res})
+                else:
+                    self._json_response(400, {"error": "Unknown playlist action"})
             except Exception as e:
                 self._json_response(500, {"error": str(e)})
             return
