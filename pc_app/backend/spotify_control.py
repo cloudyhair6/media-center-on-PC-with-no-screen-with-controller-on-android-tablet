@@ -47,6 +47,7 @@ class SpotifyControl:
     _last_context_desc = ""
     _cached_user_id = ""
     _cached_liked_playlist_uri = ""
+    _playlist_owner_cache = {}
     _last_seek_time = 0.0
     _last_seek_pos_ms = 0
     _last_seek_is_active = False
@@ -231,19 +232,20 @@ class SpotifyControl:
     @staticmethod
     def play_uri(uri: str) -> None:
         target_uri = (uri or "").strip()
-        if target_uri in ("spotify:collection:tracks", "spotify:collection", "liked"):
-            user_id = SpotifyControl.get_user_id()
-            if user_id:
-                target_uri = f"spotify:user:{user_id}:collection"
-
-        out = SpotifyControl._run_cli(["play", target_uri])
-        if ("failed to play" in out.lower() or "error" in out.lower()):
-            if target_uri.endswith(":collection"):
+        if target_uri.startswith("spotify:track:"):
+            SpotifyControl._last_context_uri = ""
+            SpotifyControl._last_context_desc = ""
+            SpotifyControl._run_cli(["play", target_uri])
+        else:
+            is_liked = target_uri in ("spotify:collection:tracks", "spotify:collection", "liked") or target_uri.endswith(":collection")
+            if is_liked:
                 liked_pl = SpotifyControl.get_liked_playlist_uri()
-                if liked_pl and liked_pl != target_uri:
-                    out = SpotifyControl._run_cli(["play", liked_pl])
-            if ("failed to play" in out.lower() or "error" in out.lower()) and target_uri != uri:
-                SpotifyControl._run_cli(["play", uri])
+                out = SpotifyControl._run_cli(["play", liked_pl])
+                if "failed to play" in (out or "").lower() or "error" in (out or "").lower():
+                    coll_uri = SpotifyControl._resolve_collection_uri(target_uri)
+                    SpotifyControl._run_cli(["play", coll_uri])
+            else:
+                SpotifyControl._run_cli(["play", target_uri])
         
         # Give CLI a split second to send the play command
         import time
@@ -357,48 +359,18 @@ class SpotifyControl:
 
     @staticmethod
     def play_track_in_playlist(playlist_uri: str, track_uri: str, position: int = -1) -> bool:
-        """Play a specific song from a playlist while also playing/continuing the playlist."""
+        """Play a specific song directly without claiming playlist context."""
         if not track_uri:
             if playlist_uri:
+                SpotifyControl._last_context_uri = playlist_uri
                 SpotifyControl.play_uri(playlist_uri)
                 return True
             return False
 
-        SpotifyControl._last_context_uri = playlist_uri
-        is_shuffle = bool(SpotifyControl._last_metadata.get("shuffle", False))
-
-        if playlist_uri:
-            SpotifyControl.play_uri(playlist_uri)
-            time.sleep(0.35)
-
-            if position == 0 and not is_shuffle:
-                np_out = SpotifyControl._run_cli(["now-playing", "--format", "json"])
-                if track_uri in (np_out or ""):
-                    return True
-
-            q_out = SpotifyControl._run_cli(["queue", "add", track_uri])
-            if "Added" in (q_out or "") or "error" not in (q_out or "").lower():
-                time.sleep(0.15)
-                SpotifyControl._run_cli(["next"])
-            else:
-                SpotifyControl._run_cli(["play", track_uri])
-
-            if not is_shuffle and position >= 0:
-                import threading
-                def _queue_following():
-                    try:
-                        details = SpotifyControl.get_playlist_details(playlist_uri, limit=15, offset=position + 1)
-                        for tr in details.get("tracks", [])[:15]:
-                            t_u = tr.get("uri", "")
-                            if t_u:
-                                SpotifyControl._run_cli(["queue", "add", t_u])
-                    except Exception:
-                        pass
-                threading.Thread(target=_queue_following, daemon=True).start()
-            return True
-        else:
-            SpotifyControl.play_uri(track_uri)
-            return True
+        SpotifyControl._last_context_uri = ""
+        SpotifyControl._last_context_desc = ""
+        SpotifyControl.play_uri(track_uri)
+        return True
 
     @staticmethod
     def playlist_create(name: str, description: str = "", public: bool = False) -> dict:
@@ -682,7 +654,10 @@ class SpotifyControl:
                         if ctx_obj and isinstance(ctx_obj, dict):
                             actual_ctx = ctx_obj.get("uri", "")
                             if actual_ctx:
-                                SpotifyControl._last_context_uri = actual_ctx
+                                SpotifyControl._last_context_uri = "" if actual_ctx.startswith("spotify:track:") else actual_ctx
+                        if SpotifyControl._last_context_uri.startswith("spotify:track:"):
+                            SpotifyControl._last_context_uri = ""
+                            SpotifyControl._last_context_desc = ""
                         
                         context_desc = cp.get("context_description", "") if cp else ""
                         if not context_desc:
@@ -839,6 +814,110 @@ class SpotifyControl:
 
     @staticmethod
     def get_folder_hierarchy() -> dict:
+        """Get the full library folder and playlist hierarchy, enriched with Liked Songs and playlist owners."""
+        output = SpotifyControl._run_cli(["folder", "list", "--recursive", "--format", "json"])
+        data = {}
+        if output:
+            try:
+                data = json.loads(output)
+            except Exception:
+                data = {}
+        if not isinstance(data, dict):
+            data = {}
+
+        raw_items = data.get("items", [])
+        if not isinstance(raw_items, list):
+            raw_items = []
+
+        user_id = SpotifyControl.get_user_id()
+        liked_pl_uri = SpotifyControl.get_liked_playlist_uri()
+
+        enriched_items = []
+        # Prepend Liked Songs so it looks and behaves like a normal playlist in the Library
+        liked_entry = {
+            "uri": "spotify:collection:tracks",
+            "art_uri": liked_pl_uri if liked_pl_uri.startswith("spotify:playlist:") else "spotify:collection:tracks",
+            "name": "Liked Songs",
+            "type": "playlist",
+            "owner": user_id or "You",
+            "depth": 1,
+            "is_liked": True,
+        }
+        enriched_items.append(liked_entry)
+
+        # Resolve owner for any uncached playlists concurrently
+        uncached_uris = []
+        for it in raw_items:
+            if not isinstance(it, dict):
+                continue
+            u = (it.get("uri") or "").strip()
+            t = (it.get("type") or "playlist").lower()
+            if t == "playlist" and u.startswith("spotify:playlist:") and u not in SpotifyControl._playlist_owner_cache:
+                uncached_uris.append(u)
+
+        if uncached_uris:
+            import concurrent.futures
+            def _fetch_owner(pl_uri: str):
+                try:
+                    cli_path = SpotifyControl._get_cli_path()
+                    if not Path(cli_path).exists():
+                        return pl_uri, ""
+                    res = subprocess.run(
+                        [cli_path, "playlist", "get", pl_uri, "--no-tracks", "--format", "json"],
+                        capture_output=True, timeout=4, creationflags=0x08000000
+                    )
+                    txt = res.stdout.decode("utf-8", errors="replace").strip()
+                    if txt:
+                        pl_data = json.loads(txt)
+                        owner = (pl_data.get("owner") or "").strip()
+                        return pl_uri, owner
+                except Exception:
+                    pass
+                return pl_uri, ""
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+                for pl_uri, owner in pool.map(_fetch_owner, uncached_uris):
+                    if owner:
+                        SpotifyControl._playlist_owner_cache[pl_uri] = owner
+
+        for it in raw_items:
+            if not isinstance(it, dict):
+                continue
+            item_copy = dict(it)
+            u = (item_copy.get("uri") or "").strip()
+            t = (item_copy.get("type") or "playlist").lower()
+            owner = (item_copy.get("owner") or "").strip()
+            if not owner:
+                if t == "playlist" and u in SpotifyControl._playlist_owner_cache:
+                    owner = SpotifyControl._playlist_owner_cache[u]
+                elif ":user:" in u:
+                    try:
+                        owner = u.split(":user:", 1)[1].split(":", 1)[0]
+                    except Exception:
+                        owner = ""
+                elif t == "folder" and user_id:
+                    owner = user_id
+            item_copy["owner"] = owner
+            item_copy["art_uri"] = u
+            enriched_items.append(item_copy)
+
+        data["items"] = enriched_items
+        return data
+
+    @staticmethod
+    def queue_remove(position: int) -> bool:
+        """Remove a track at 0-based position from the upcoming queue."""
+        output = SpotifyControl._run_cli(["queue", "remove", str(max(0, int(position)))])
+        return "error" not in (output or "").lower() and "failed" not in (output or "").lower()
+
+    @staticmethod
+    def queue_move(from_pos: int, to_pos: int) -> bool:
+        """Move a track from one 0-based position to another in the queue."""
+        output = SpotifyControl._run_cli(["queue", "move", str(max(0, int(from_pos))), str(max(0, int(to_pos)))])
+        return "error" not in (output or "").lower() and "failed" not in (output or "").lower()
+
+    @staticmethod
+    def _legacy_get_folder_hierarchy_unused() -> dict:
         """Get the full library folder and playlist hierarchy."""
         output = SpotifyControl._run_cli(["folder", "list", "--recursive", "--format", "json"])
         if not output:

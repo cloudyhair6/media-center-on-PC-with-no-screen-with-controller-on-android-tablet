@@ -368,10 +368,20 @@ class _RemoteHandler(BaseHTTPRequestHandler):
             try:
                 from urllib.parse import urlparse, parse_qs
                 from backend.spotify_control import SpotifyControl
+                qs = parse_qs(urlparse(self.path).query)
                 action = path.split("/api/spotify/queue", 1)[1].split("?")[0]
                 if action == "/add":
-                    uri = parse_qs(urlparse(self.path).query).get("uri", [""])[0]
+                    uri = qs.get("uri", [""])[0]
                     res = SpotifyControl.queue_add(uri)
+                    self._json_response(200, {"ok": res})
+                elif action == "/remove":
+                    pos = int(qs.get("position", qs.get("pos", ["0"]))[0])
+                    res = SpotifyControl.queue_remove(pos)
+                    self._json_response(200, {"ok": res})
+                elif action == "/move":
+                    from_pos = int(qs.get("from", ["0"])[0])
+                    to_pos = int(qs.get("to", ["0"])[0])
+                    res = SpotifyControl.queue_move(from_pos, to_pos)
                     self._json_response(200, {"ok": res})
                 else:
                     res = SpotifyControl.get_queue()
@@ -431,7 +441,11 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 uri = parse_qs(urlparse(self.path).query).get("uri", [""])[0]
                 if uri:
                     from backend.spotify_control import SpotifyControl
-                    SpotifyControl._last_context_uri = uri
+                    if uri.startswith("spotify:track:"):
+                        SpotifyControl._last_context_uri = ""
+                        SpotifyControl._last_context_desc = ""
+                    else:
+                        SpotifyControl._last_context_uri = uri
                     SpotifyControl.play_uri(uri)
                     self._json_response(200, {"ok": True})
                 else:
@@ -865,7 +879,12 @@ class _RemoteHandler(BaseHTTPRequestHandler):
                 import json as json_mod
                 uri = parse_qs(urlparse(self.path).query).get("uri", [""])[0]
                 if uri:
-                    res = SpotifyControl._run_cli(["lookup", uri, "--format", "json"])
+                    lookup_uri = uri
+                    if lookup_uri in ("spotify:collection:tracks", "spotify:collection", "liked") or lookup_uri.endswith(":collection"):
+                        liked_pl = SpotifyControl.get_liked_playlist_uri()
+                        if liked_pl:
+                            lookup_uri = liked_pl
+                    res = SpotifyControl._run_cli(["lookup", lookup_uri, "--format", "json"])
                     if res:
                         try:
                             data = json_mod.loads(res)

@@ -2964,15 +2964,132 @@ public class MainActivity extends Activity {
 
                 LinearLayout row = new LinearLayout(MainActivity.this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setPadding(12, 12, 12, 12);
+                row.setPadding(10, 15, 10, 15);
                 row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+                if (prefs.getBoolean("show_album_art", true)) {
+                    final RelativeLayout artContainer = new RelativeLayout(MainActivity.this);
+                    artContainer.setLayoutParams(new LinearLayout.LayoutParams(100, 100));
+                    artContainer.setPadding(0, 0, 15, 0);
+                    row.addView(artContainer);
+
+                    final ImageView img = new ImageView(MainActivity.this);
+                    img.setLayoutParams(new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.FILL_PARENT, RelativeLayout.LayoutParams.FILL_PARENT));
+                    artContainer.addView(img);
+
+                    final ProgressBar pb = new ProgressBar(MainActivity.this);
+                    RelativeLayout.LayoutParams pbParams = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT);
+                    pbParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+                    pb.setLayoutParams(pbParams);
+                    pb.setVisibility(View.GONE);
+                    artContainer.addView(pb);
+
+                    final LinearLayout errLayout = new LinearLayout(MainActivity.this);
+                    errLayout.setOrientation(LinearLayout.VERTICAL);
+                    errLayout.setGravity(android.view.Gravity.CENTER);
+                    RelativeLayout.LayoutParams errParams = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT);
+                    errParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+                    errLayout.setLayoutParams(errParams);
+                    errLayout.setVisibility(View.GONE);
+
+                    final TextView errText = new TextView(MainActivity.this);
+                    errText.setTextColor(0xFFFFFFFF);
+                    errText.setTextSize(10);
+                    errText.setGravity(android.view.Gravity.CENTER);
+                    errLayout.addView(errText);
+
+                    final Button retryBtn = new Button(MainActivity.this);
+                    retryBtn.setText("Retry");
+                    retryBtn.setTextSize(10);
+                    retryBtn.setPadding(2, 2, 2, 2);
+                    styleDynamicButton(retryBtn);
+                    errLayout.addView(retryBtn);
+
+                    artContainer.addView(errLayout);
+
+                    final Runnable fetchImage = new Runnable() {
+                        @Override
+                        public void run() {
+                            img.setTag(null);
+                            img.setImageBitmap(null);
+                            errLayout.setVisibility(View.GONE);
+
+                            if (trackUri.isEmpty()) {
+                                pb.setVisibility(View.GONE);
+                                img.setImageResource(R.drawable.ic_error);
+                                errText.setText("URL missing");
+                                errLayout.setVisibility(View.VISIBLE);
+                                return;
+                            }
+
+                            pb.setVisibility(View.VISIBLE);
+                            beginTask(false);
+                            api.get("/api/proxy_art?uri=" + java.net.URLEncoder.encode(trackUri), new ApiClient.Callback() {
+                                @Override public void onSuccess(String response) {
+                                    endTask(2000);
+                                    try {
+                                        JSONObject j = new JSONObject(response);
+                                        final String imgUrl = j.optString("thumbnail_url", "");
+                                        if (!imgUrl.isEmpty()) {
+                                            img.setTag(imgUrl);
+                                            Bitmap cached = bitmapCache.get(imgUrl);
+                                            if (cached != null) {
+                                                pb.setVisibility(View.GONE);
+                                                img.setImageBitmap(cached);
+                                                return;
+                                            }
+                                            new AsyncTask<Void, Void, Bitmap>() {
+                                                @Override protected Bitmap doInBackground(Void... voids) {
+                                                    return downloadAndDecodeBitmap(imgUrl, 100, 100, false);
+                                                }
+                                                @Override protected void onPostExecute(Bitmap b) {
+                                                    pb.setVisibility(View.GONE);
+                                                    if (b != null) {
+                                                        bitmapCache.put(imgUrl, b);
+                                                        if (imgUrl.equals(img.getTag())) {
+                                                            img.setImageBitmap(b);
+                                                        }
+                                                    } else {
+                                                        if (imgUrl.equals(img.getTag())) {
+                                                            showError("Download failed");
+                                                        }
+                                                    }
+                                                }
+                                            }.execute();
+                                        } else showError("URL missing");
+                                    } catch (Exception e) { showError("URL missing"); }
+                                }
+                                @Override public void onError(String error) { endTask(2000); showError("URL missing"); }
+
+                                private void showError(String msg) {
+                                    pb.setVisibility(View.GONE);
+                                    img.setImageResource(R.drawable.ic_error);
+                                    errText.setText(msg);
+                                    errLayout.setVisibility(View.VISIBLE);
+                                }
+                            });
+                        }
+                    };
+
+                    retryBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) { fetchImage.run(); }
+                    });
+
+                    fetchImage.run();
+                }
+
+                TextView num = new TextView(MainActivity.this);
+                num.setText((pos + 1) + ". ");
+                num.setTextColor(0xFF8892b0);
+                num.setTextSize(16);
+                row.addView(num);
 
                 LinearLayout textCol = new LinearLayout(MainActivity.this);
                 textCol.setOrientation(LinearLayout.VERTICAL);
                 textCol.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
                 TextView tvTitle = new TextView(MainActivity.this);
-                tvTitle.setText((pos + 1) + ". " + trackName);
+                tvTitle.setText(trackName);
                 tvTitle.setTextSize(16);
                 if (!trackUri.isEmpty() && trackUri.equals(currentNpUri)) {
                     tvTitle.setTextColor(0xFF00FFaa);
@@ -3002,18 +3119,16 @@ public class MainActivity extends Activity {
                 LinearLayout btns = new LinearLayout(MainActivity.this);
                 btns.setOrientation(LinearLayout.HORIZONTAL);
 
-                // Play Song + Playlist button
+                // Play Song button (plays song directly without claiming playlist context)
                 Button playSongBtn = new Button(MainActivity.this);
                 playSongBtn.setText("Play");
                 styleDynamicButton(playSongBtn);
                 playSongBtn.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        String playUrl = "/api/spotify/playlist/play_track?playlist_uri=" + java.net.URLEncoder.encode(playlistUri)
-                            + "&track_uri=" + java.net.URLEncoder.encode(trackUri)
-                            + "&position=" + pos;
-                        sendCommand(playUrl);
-                        showToast("Playing " + trackName + " in " + plName, true);
+                        currentContextUri = "";
+                        if (npContext != null) npContext.setVisibility(View.GONE);
+                        sendCommand("/api/spotify/play?uri=" + java.net.URLEncoder.encode(trackUri));
                     }
                 });
                 btns.addView(playSongBtn);
@@ -3080,43 +3195,11 @@ public class MainActivity extends Activity {
         topActionsRow.setPadding(6, 6, 6, 12);
         topActionsRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
 
-        Button likedBtn = new Button(MainActivity.this);
-        likedBtn.setText("Play Liked Songs");
-        if ("spotify:collection:tracks".equals(currentContextUri)) {
-            likedBtn.setTextColor(0xFF00FFaa);
-            likedBtn.setTypeface(null, android.graphics.Typeface.BOLD);
-        } else {
-            likedBtn.setTextColor(0xFF00d4ff);
-            likedBtn.setTypeface(null, android.graphics.Typeface.NORMAL);
-        }
-        likedBtn.setTextSize(17);
-        likedBtn.setPadding(16, 26, 16, 26);
-        likedBtn.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        styleDynamicButton(likedBtn);
-        likedBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                sendCommand("/api/spotify/play?uri=spotify:collection:tracks");
-            }
-        });
-        topActionsRow.addView(likedBtn);
-
-        Button viewLikedBtn = new Button(MainActivity.this);
-        viewLikedBtn.setText("View Liked Songs");
-        viewLikedBtn.setTextSize(17);
-        viewLikedBtn.setPadding(16, 26, 16, 26);
-        viewLikedBtn.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        styleDynamicButton(viewLikedBtn);
-        viewLikedBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                openPlaylistTracks("spotify:collection:tracks", "My Liked Songs", 0);
-            }
-        });
-        topActionsRow.addView(viewLikedBtn);
-
         Button createPlBtn = new Button(MainActivity.this);
         createPlBtn.setText("+ New Playlist");
         createPlBtn.setTextSize(17);
-        createPlBtn.setPadding(16, 26, 16, 26);
+        createPlBtn.setPadding(16, 20, 16, 20);
+        createPlBtn.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.FILL_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         styleDynamicButton(createPlBtn);
         createPlBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -3128,12 +3211,35 @@ public class MainActivity extends Activity {
         container.addView(topActionsRow);
 
         try {
-            for (int i = 0; i < cachedLibraryItems.length(); i++) {
-                final JSONObject item = cachedLibraryItems.getJSONObject(i);
+            JSONArray itemsToRender = new JSONArray();
+            boolean hasLiked = false;
+            for (int k = 0; k < cachedLibraryItems.length(); k++) {
+                JSONObject it = cachedLibraryItems.optJSONObject(k);
+                if (it != null && ("spotify:collection:tracks".equals(it.optString("uri")) || it.optBoolean("is_liked", false))) {
+                    hasLiked = true;
+                    break;
+                }
+            }
+            if (!hasLiked) {
+                JSONObject likedObj = new JSONObject();
+                likedObj.put("uri", "spotify:collection:tracks");
+                likedObj.put("name", "Liked Songs");
+                likedObj.put("type", "playlist");
+                likedObj.put("depth", 1);
+                likedObj.put("is_liked", true);
+                itemsToRender.put(likedObj);
+            }
+            for (int k = 0; k < cachedLibraryItems.length(); k++) {
+                itemsToRender.put(cachedLibraryItems.getJSONObject(k));
+            }
+
+            for (int i = 0; i < itemsToRender.length(); i++) {
+                final JSONObject item = itemsToRender.getJSONObject(i);
                 final String uri = item.optString("uri", "");
                 final String parentUri = item.optString("parent_uri", null);
                 final String type = item.optString("type", "playlist");
                 final int depth = item.optInt("depth", 1);
+                final boolean isLikedItem = item.optBoolean("is_liked", false) || "spotify:collection:tracks".equals(uri);
                 
                 if (!isItemVisible(parentUri)) continue;
                 
@@ -3143,7 +3249,8 @@ public class MainActivity extends Activity {
                 row.setPadding(leftPadding, 15, 10, 15);
                 row.setGravity(android.view.Gravity.CENTER_VERTICAL);
                 
-                String artUriToLoad = uri;
+                String artUriToLoad = item.optString("art_uri", uri);
+                if (artUriToLoad == null || artUriToLoad.isEmpty()) artUriToLoad = uri;
                 if (type.equals("folder")) {
                     artUriToLoad = getFolderArtUri(uri);
                     if (artUriToLoad == null) artUriToLoad = "";
@@ -3273,13 +3380,16 @@ public class MainActivity extends Activity {
                 textCol.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
                 final String itemName = item.optString("name", "Unknown");
+                final String artUriForCheck = item.optString("art_uri", "");
                 TextView tvName = new TextView(MainActivity.this);
                 String namePrefix = "";
                 if (type.equals("folder")) {
                     namePrefix = expandedFolders.contains(uri) ? "[Open] " : "[Folder] ";
                 }
                 tvName.setText(namePrefix + itemName);
-                if (uri.equals(currentContextUri) && !uri.isEmpty()) {
+                boolean isCurrentContext = (!uri.isEmpty() && uri.equals(currentContextUri))
+                    || (!artUriForCheck.isEmpty() && artUriForCheck.equals(currentContextUri));
+                if (isCurrentContext) {
                     tvName.setTextColor(0xFF00FFaa); // Glowing green-blue
                     tvName.setTypeface(null, android.graphics.Typeface.BOLD);
                 } else {
@@ -3292,7 +3402,17 @@ public class MainActivity extends Activity {
                 textCol.addView(tvName);
                 
                 TextView tvArtist = new TextView(MainActivity.this);
-                tvArtist.setText(item.optString("artist", ""));
+                String rawType = (type == null || type.isEmpty()) ? "playlist" : type;
+                String displayType = rawType.substring(0, 1).toUpperCase() + rawType.substring(1);
+                String owner = item.optString("owner", "");
+                if (owner == null || owner.isEmpty()) {
+                    owner = item.optString("artist", "");
+                }
+                String subLabel = displayType;
+                if (owner != null && !owner.isEmpty()) {
+                    subLabel = displayType + "  •  Owner: " + owner;
+                }
+                tvArtist.setText(subLabel);
                 tvArtist.setTextSize(14);
                 tvArtist.setTextColor(0xFF8892b0);
                 tvArtist.setSingleLine(true);
@@ -3349,26 +3469,28 @@ public class MainActivity extends Activity {
                     });
                     btns.addView(playBtn);
                     
-                    Button removeBtn = new Button(MainActivity.this);
-                    removeBtn.setText("Remove from library");
-                    styleDynamicButton(removeBtn);
-                    removeBtn.setOnClickListener(new View.OnClickListener() {
-                        @Override public void onClick(View v) {
-                            final int remLoadId = startLoading("Removing from Library...");
-                            api.get("/api/spotify/library/remove?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
-                                @Override public void onSuccess(String response) {
-                                    stopLoading(remLoadId);
-                                    runOnUiThread(new Runnable() {
-                                        @Override public void run() { loadLibrary(); }
-                                    });
-                                }
-                                @Override public void onError(String error) {
-                                    stopLoading(remLoadId);
-                                }
-                            });
-                        }
-                    });
-                    btns.addView(removeBtn);
+                    if (!isLikedItem && !type.equals("folder")) {
+                        Button removeBtn = new Button(MainActivity.this);
+                        removeBtn.setText("Remove from library");
+                        styleDynamicButton(removeBtn);
+                        removeBtn.setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View v) {
+                                final int remLoadId = startLoading("Removing from Library...");
+                                api.get("/api/spotify/library/remove?uri=" + java.net.URLEncoder.encode(uri), new ApiClient.Callback() {
+                                    @Override public void onSuccess(String response) {
+                                        stopLoading(remLoadId);
+                                        runOnUiThread(new Runnable() {
+                                            @Override public void run() { loadLibrary(); }
+                                        });
+                                    }
+                                    @Override public void onError(String error) {
+                                        stopLoading(remLoadId);
+                                    }
+                                });
+                            }
+                        });
+                        btns.addView(removeBtn);
+                    }
                 }
                 
                 row.addView(btns);
@@ -3527,18 +3649,79 @@ public class MainActivity extends Activity {
                             tv.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
                             row.addView(tv);
                             
+                            final int queuePos = i;
+                            final int totalQueueItems = items.length();
+                            final String trackDisplayName = name;
+
+                            LinearLayout btns = new LinearLayout(MainActivity.this);
+                            btns.setOrientation(LinearLayout.HORIZONTAL);
+
                             if (!uri.isEmpty()) {
                                 Button btnPlay = new Button(MainActivity.this);
                                 btnPlay.setText("Play");
-                                btnPlay.setPadding(20, 10, 20, 10);
+                                btnPlay.setPadding(16, 10, 16, 10);
                                 styleDynamicButton(btnPlay);
                                 btnPlay.setOnClickListener(new View.OnClickListener() {
                                     @Override public void onClick(View v) {
+                                        currentContextUri = "";
+                                        if (npContext != null) npContext.setVisibility(View.GONE);
                                         sendCommand("/api/spotify/play?uri=" + java.net.URLEncoder.encode(uri));
                                     }
                                 });
-                                row.addView(btnPlay);
+                                btns.addView(btnPlay);
                             }
+
+                            if (queuePos > 0) {
+                                Button btnUp = new Button(MainActivity.this);
+                                btnUp.setText("Up");
+                                btnUp.setPadding(14, 10, 14, 10);
+                                styleDynamicButton(btnUp);
+                                btnUp.setOnClickListener(new View.OnClickListener() {
+                                    @Override public void onClick(View v) {
+                                        moveQueueItem(queuePos, queuePos - 1);
+                                    }
+                                });
+                                btns.addView(btnUp);
+                            }
+
+                            if (queuePos < totalQueueItems - 1) {
+                                Button btnDown = new Button(MainActivity.this);
+                                btnDown.setText("Down");
+                                btnDown.setPadding(14, 10, 14, 10);
+                                styleDynamicButton(btnDown);
+                                btnDown.setOnClickListener(new View.OnClickListener() {
+                                    @Override public void onClick(View v) {
+                                        moveQueueItem(queuePos, queuePos + 1);
+                                    }
+                                });
+                                btns.addView(btnDown);
+                            }
+
+                            if (totalQueueItems > 1) {
+                                Button btnMove = new Button(MainActivity.this);
+                                btnMove.setText("Move");
+                                btnMove.setPadding(14, 10, 14, 10);
+                                styleDynamicButton(btnMove);
+                                btnMove.setOnClickListener(new View.OnClickListener() {
+                                    @Override public void onClick(View v) {
+                                        showMoveQueueItemDialog(queuePos, totalQueueItems, trackDisplayName);
+                                    }
+                                });
+                                btns.addView(btnMove);
+                            }
+
+                            Button btnRemove = new Button(MainActivity.this);
+                            btnRemove.setText("Remove");
+                            btnRemove.setPadding(14, 10, 14, 10);
+                            styleDynamicButton(btnRemove);
+                            btnRemove.setOnClickListener(new View.OnClickListener() {
+                                @Override public void onClick(View v) {
+                                    removeQueueItem(queuePos, trackDisplayName);
+                                }
+                            });
+                            btns.addView(btnRemove);
+
+                            row.addView(btns);
                             
                             container.addView(row);
                         }
@@ -3561,6 +3744,92 @@ public class MainActivity extends Activity {
             }
             @Override public void onError(String error) { stopLoading(loadId); showToast("Queue load failed", false); }
         });
+    }
+
+    private void removeQueueItem(final int position, final String trackName) {
+        final int loadId = startLoading("Removing from Queue...");
+        api.get("/api/spotify/queue/remove?position=" + position, new ApiClient.Callback() {
+            @Override
+            public void onSuccess(String response) {
+                stopLoading(loadId);
+                showToast("Removed " + trackName, true);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        loadQueue();
+                    }
+                });
+            }
+            @Override
+            public void onError(String error) {
+                stopLoading(loadId);
+                showToast("Failed to remove from queue", false);
+            }
+        });
+    }
+
+    private void moveQueueItem(final int fromPos, final int toPos) {
+        final int loadId = startLoading("Reordering Queue...");
+        api.get("/api/spotify/queue/move?from=" + fromPos + "&to=" + toPos, new ApiClient.Callback() {
+            @Override
+            public void onSuccess(String response) {
+                stopLoading(loadId);
+                showToast("Moved to #" + (toPos + 1), true);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        loadQueue();
+                    }
+                });
+            }
+            @Override
+            public void onError(String error) {
+                stopLoading(loadId);
+                showToast("Failed to move track in queue", false);
+            }
+        });
+    }
+
+    private void showMoveQueueItemDialog(final int fromPos, final int totalItems, final String trackName) {
+        LinearLayout layout = new LinearLayout(MainActivity.this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(24, 16, 24, 16);
+
+        TextView label = new TextView(MainActivity.this);
+        label.setText("Move \"" + trackName + "\" (currently #" + (fromPos + 1) + ") to position (1 - " + totalItems + "):");
+        label.setTextSize(15);
+        label.setPadding(0, 0, 0, 10);
+        layout.addView(label);
+
+        final EditText posInput = new EditText(MainActivity.this);
+        posInput.setHint("1 - " + totalItems);
+        posInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        posInput.setSingleLine(true);
+        layout.addView(posInput);
+
+        new AlertDialog.Builder(MainActivity.this)
+            .setTitle("Move in Queue")
+            .setView(layout)
+            .setPositiveButton("Move", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    String val = posInput.getText().toString().trim();
+                    try {
+                        int targetOneBased = Integer.parseInt(val);
+                        int targetZeroBased = targetOneBased - 1;
+                        if (targetZeroBased < 0 || targetZeroBased >= totalItems) {
+                            showToast("Enter a number between 1 and " + totalItems, false);
+                            return;
+                        }
+                        if (targetZeroBased == fromPos) return;
+                        moveQueueItem(fromPos, targetZeroBased);
+                    } catch (Exception e) {
+                        showToast("Invalid position number", false);
+                    }
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
     }
 
 
